@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# -*- coding: utf-8 -*-
+# -- coding: utf-8 --
 """
 Welding Shop Scheduling – LARGE EXAMPLE (8 jobs, 30 ops)
 Verification + visualization:
@@ -7,14 +7,13 @@ Verification + visualization:
 - Number of operations per job
 - Release and due dates per job
 - GLOBAL precedence table + matrix (all operations)
-- Job-based precedence list
-- Job-based small precedence graphs
 - Machine-wise welding schedule
 - Station-wise welding schedule
 """
 
 from gurobipy import Model, GRB, quicksum
 import matplotlib.pyplot as plt
+from check_gurobi import check_solution_gurobi
 
 # ===============================
 #  DATA (LARGE EXAMPLE – 8 jobs, 30 ops)
@@ -38,29 +37,69 @@ O_j = {
     8: [27, 28, 29, 30],
 }
 
-# Machines and stations
-M = [1, 2, 3, 4]
-L = [1, 2, 3, 4]
+# ===============================
+#  MACHINES & MACHINE TYPES
+# ===============================
 
-# Feasible machine sets M_i
-M_i = {}
+# Fiziksel makineler (12 adet)
+M = list(range(1, 13))  # [1,2,...,12]
+
+# Makine tipleri (2 tip)
+# 1 = TIG welding
+# 2 = MAG welding
+K = [1, 2]
+
+# Her makinenin tipi
+# Makine 1-3: TIG
+# Makine 4-12: MAG
+machine_type = {
+    1: 1,  # TIG
+    2: 1,  # TIG
+    3: 1,  # TIG
+    4: 2,  # MAG
+    5: 2,  # MAG
+    6: 2,  # MAG
+    7: 2,  # MAG
+    8: 2,  # MAG
+    9: 2,  # MAG
+    10: 2, # MAG
+    11: 2, # MAG
+    12: 2, # MAG
+}
+
+# Her operasyon için UYGUN makine tipleri (K_i)
+# Burayı şu an test amaçlı bir pattern ile dolduruyorum:
+# - Tek sayılı operasyonlar: sadece TIG (tip 1)
+# - Çift sayılı operasyonlar: sadece MAG (tip 2)
+# Gerçek veride bunu doğrudan inputtan besleyeceksin.
+K_i = {}
 for i in I:
-    mod = i % 4
-    if mod == 1:          # pattern 1
-        M_i[i] = [1, 2]
-    elif mod == 2:        # pattern 2
-        M_i[i] = [2, 3]
-    elif mod == 3:        # pattern 3
-        M_i[i] = [2, 3, 4]
-    else:                 # mod == 0, pattern 4
-        M_i[i] = [1, 3, 4]
+    if i % 2 == 1:
+        K_i[i] = [1]      # TIG
+    else:
+        K_i[i] = [2]      # MAG
 
-# Feasible station sets L_i (şimdilik hepsi tüm istasyonlara gidebilir)
-L_i = {i: [1, 2, 3, 4] for i in I}
+# FEASIBLE MACHINE SETS M_i
+# M_i[i] = { m ∈ M : machine_type[m] ∈ K_i[i] }
+M_i = {
+    i: [m for m in M if machine_type[m] in K_i[i]]
+    for i in I
+}
+
+# ===============================
+#  STATIONS
+# ===============================
+
+# 9 istasyon
+L = list(range(1, 10))  # [1,...,9]
+
+# Şimdilik tüm operasyonlar tüm istasyonlara gidebiliyor
+L_i = {i: L[:] for i in I}
 
 # Big and small stations
+# Örnek: 1,2,3 büyük istasyon; 4–9 küçük istasyon
 L_big   = [1, 2, 3]
-L_small = [4]
+L_small = [4, 5, 6, 7, 8, 9]
 
 # ===============================
 #  PRECEDENCE (bazıları bağlı, bazıları bağımsız)
@@ -292,68 +331,19 @@ def visualize_jobs_and_ops(J, O_j, r_j, d_j, g_j, p_j, t_grind_j, t_paint_j):
     plt.tight_layout()
 
 
-def print_precedence_by_job(J, O_j, Pred_i):
+def visualize_precedence_matrix(I, Pred_i):
     """
-    Her job için: her operasyonun predecessor listesini yazdır.
-    """
-    print("\n=== PRECEDENCE BY JOB ===")
-    for j in J:
-        print(f"\nJob {j}: ops = {O_j[j]}")
-        for i in O_j[j]:
-            preds = Pred_i[i]
-            print(f"  Op {i}: preds = {preds}")
+    GLOBAL precedence table + matrix:
 
-
-def visualize_precedence_per_job(J, O_j, Pred_i):
-    """
-    Her job için küçük bir precedence grafiği:
-    - X ekseni: job içindeki sıralama
-    - Üzerine oklarla h -> i bağları
-    """
-    for j in J:
-        ops = O_j[j]
-        plt.figure()
-        x_pos = {i: k for k, i in enumerate(ops)}  # job içindeki index
-        y = 0.0
-
-        # düğümler
-        for i in ops:
-            x = x_pos[i]
-            plt.scatter(x, y)
-            plt.text(x, y + 0.05, str(i), ha="center")
-
-        # oklar (h -> i) – sadece aynı job içindeki predecessor'ları çiz
-        for i in ops:
-            for h in Pred_i[i]:
-                if h not in ops:
-                    continue
-                x1, y1 = x_pos[h], y
-                x2, y2 = x_pos[i], y
-                plt.annotate(
-                    "",
-                    xy=(x2, y2),
-                    xytext=(x1, y1),
-                    arrowprops=dict(arrowstyle="->")
-                )
-
-        plt.title(f"Job {j} precedence graph")
-        plt.yticks([])
-        plt.xticks(list(x_pos.values()), [str(i) for i in ops])
-        plt.xlabel("Operation order in job")
-        plt.tight_layout()
-
-
-def visualize_precedence_matrix_with_job_blocks(I, Pred_i, O_j, J):
-    """
-    GLOBAL precedence matrix:
-    - matrix[h, i] = 1 if h -> i
-    - job blok sınırlarını çiz
+    - Prints all precedence relations h -> i
+    - Draws an |I| x |I| matrix: row = predecessor h, col = successor i
     """
     print("\n=== GLOBAL PRECEDENCE LIST (h -> i) ===")
     for i in I:
         for h in Pred_i[i]:
             print(f"{h} -> {i}")
 
+    # build matrix
     n = len(I)
     index_of = {op: idx for idx, op in enumerate(I)}
     mat = [[0] * n for _ in range(n)]
@@ -364,6 +354,7 @@ def visualize_precedence_matrix_with_job_blocks(I, Pred_i, O_j, J):
                 rh = index_of[h]
                 mat[rh][ci] = 1
 
+    # plot matrix
     plt.figure()
     plt.imshow(mat, aspect="auto")
     plt.colorbar(label="Precedence (1 = h -> i)")
@@ -371,18 +362,7 @@ def visualize_precedence_matrix_with_job_blocks(I, Pred_i, O_j, J):
     plt.yticks(range(n), I)
     plt.xlabel("Successor operation i")
     plt.ylabel("Predecessor operation h")
-    plt.title("Precedence matrix with job blocks")
-
-    # job blok sınır çizgileri
-    pos = 0
-    for j in J:
-        size = len(O_j[j])
-        plt.axvline(pos - 0.5, linestyle="--")
-        plt.axhline(pos - 0.5, linestyle="--")
-        pos += size
-    plt.axvline(pos - 0.5, linestyle="--")
-    plt.axhline(pos - 0.5, linestyle="--")
-
+    plt.title("Precedence matrix for all operations")
     plt.tight_layout()
 
 
@@ -462,8 +442,12 @@ y = model.addVars(
 )
 
 # sequencing z_{ii'm}, z_{ii'ℓ}
-zM = model.addVars(I, I, M, vtype=GRB.BINARY, name="zM")
-zL = model.addVars(I, I, L, vtype=GRB.BINARY, name="zL")
+# !!! i != i' şartı burada sağlandı (LaTeX modeline uygun)
+zM_index = [(i, h, m) for i in I for h in I if i != h for m in M]
+zM = model.addVars(zM_index, vtype=GRB.BINARY, name="zM")
+
+zL_index = [(i, h, l) for i in I for h in I if i != h for l in L]
+zL = model.addVars(zL_index, vtype=GRB.BINARY, name="zL")
 
 # times
 S = model.addVars(I, lb=0.0, vtype=GRB.CONTINUOUS, name="S")
@@ -527,7 +511,7 @@ for j in J:
     first_op = O_j[j][0]
     model.addConstr(S[first_op] >= r_j[j], name=f"release_{j}")
 
-# 7–8) Machine sequencing
+# 7–8) Machine sequencing (i != h zaten index setinde sağlanıyor)
 I_list = I[:]
 nI = len(I_list)
 
@@ -568,7 +552,7 @@ for idx_i in range(nI):
                 name=f"zM_ge_sum_{i}{h}{m}"
             )
 
-# 9–10) Station sequencing
+# 9–10) Station sequencing (i != h yine index setinde)
 for idx_i in range(nI):
     for idx_h in range(idx_i + 1, nI):
         i = I_list[idx_i]
@@ -634,11 +618,7 @@ for j in J:
 
 verify_data(J, I, O_j, M_i, L_i, Pred_i, p_im, r_j, d_j)
 visualize_jobs_and_ops(J, O_j, r_j, d_j, g_j, p_j, t_grind_j, t_paint_j)
-
-# precedence’i daha okunur göster:
-print_precedence_by_job(J, O_j, Pred_i)
-visualize_precedence_per_job(J, O_j, Pred_i)
-visualize_precedence_matrix_with_job_blocks(I, Pred_i, O_j, J)
+visualize_precedence_matrix(I, Pred_i)
 
 # ===============================
 #  SOLVE
@@ -653,6 +633,19 @@ model.optimize()
 if model.SolCount == 0:
     print("\nNo feasible solution. Status =", model.Status)
 else:
+    check_solution_gurobi(
+        J, I, O_j,
+        M, L,
+        M_i, L_i,
+        Pred_i,
+        r_j, d_j,
+        g_j, p_j,
+        t_grind_j, t_paint_j,
+        x, y, S, C,
+        C_weld, C_final,
+        T, T_max, C_max,
+        tol=1e-6
+    )
     print("\n===== Objective =====")
     print(f"T_max = {T_max.X:.2f}")
     print(f"C_max = {C_max.X:.2f}")
