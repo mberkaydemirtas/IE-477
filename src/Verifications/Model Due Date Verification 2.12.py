@@ -6,6 +6,7 @@ Created on Tue Dec  2 19:31:52 2025
 """
 from gurobipy import Model, GRB, quicksum
 import matplotlib.pyplot as plt
+from matplotlib.patches import Patch  # legend için
 from check_gurobi import check_solution_gurobi
 
 
@@ -278,7 +279,7 @@ def visualize_jobs_and_ops(J, O_j, r_j, d_j, g_j, p_j, t_grind_j, t_paint_j):
               f"grind = {g_j[j]}, paint = {p_j[j]}, "
               f"t_grind = {t_grind_j[j]}, t_paint = {t_paint_j[j]}")
     
-    # 1) Number of operations per job
+    # 1) Number of operations per job (aynı bırakıyoruz)
     job_ids = J
     op_counts = [len(O_j[j]) for j in J]
     
@@ -290,15 +291,17 @@ def visualize_jobs_and_ops(J, O_j, r_j, d_j, g_j, p_j, t_grind_j, t_paint_j):
     plt.tight_layout()
     
     # 2) Release and due dates per job
+    # İSTEK: time x eksenine gelsin, job y eksenine
     releases = [r_j[j] for j in J]
     dues     = [d_j[j] for j in J]
     
     plt.figure()
-    plt.scatter(job_ids, releases, marker="o", label="release")
-    plt.scatter(job_ids, dues,     marker="x", label="due")
-    plt.xlabel("Job")
-    plt.ylabel("Time")
+    plt.scatter(releases, job_ids, marker="o", label="release")
+    plt.scatter(dues,     job_ids, marker="x", label="due")
+    plt.xlabel("Time")
+    plt.ylabel("Job")
     plt.title("Release and due dates per job")
+    plt.yticks(job_ids)
     plt.legend()
     plt.tight_layout()
 
@@ -341,10 +344,22 @@ def visualize_precedence_matrix(I, Pred_i):
 def plot_gantt_by_machine(I, M, M_i, x, S, C, title="Machine-wise welding schedule"):
     """
     Her makine için zaman ekseninde operasyon bloklarını çiz.
+    İSTEK: Aynı job'a ait tüm operasyonlar aynı renkte,
+           sağda/üstte job color legend paneli.
     """
-    plt.figure()
+    fig, ax = plt.subplots(figsize=(10, 6))
     y_ticks = []
     y_labels = []
+
+    # Operasyon -> job map'i
+    op_to_job = {}
+    for j in J:
+        for op in O_j[j]:
+            op_to_job[op] = j
+
+    # Job'lar için renk paleti
+    cmap = plt.cm.get_cmap("tab10")
+    job_colors = {j: cmap((j - 1) % 10) for j in J}
 
     for idx_m, m in enumerate(M):
         y_pos = idx_m
@@ -357,22 +372,49 @@ def plot_gantt_by_machine(I, M, M_i, x, S, C, title="Machine-wise welding schedu
             if x[i, m].X > 0.5:
                 start = S[i].X
                 finish = C[i].X
-                plt.barh(y_pos, finish - start, left=start)
-                plt.text(start, y_pos, f"{i}", va="center")
+                width = finish - start
 
-    plt.yticks(y_ticks, y_labels)
-    plt.xlabel("Time")
-    plt.title(title)
-    plt.tight_layout()
+                job_of_i = op_to_job.get(i, None)
+                color = job_colors.get(job_of_i, "gray")
+
+                ax.barh(y_pos, width, left=start, color=color)
+                ax.text(start + width / 2, y_pos, f"{i}",
+                        va="center", ha="center", fontsize=7)
+
+    ax.set_yticks(y_ticks)
+    ax.set_yticklabels(y_labels)
+    ax.set_xlabel("Time")
+    ax.set_title(title)
+
+    # Legend / panel: renk -> job
+    handles = [
+        Patch(facecolor=job_colors[j], label=f"Job {j}")
+        for j in J
+    ]
+    ax.legend(handles=handles, title="Jobs",
+              loc="upper right", bbox_to_anchor=(1.25, 1.0))
+    fig.tight_layout(rect=[0, 0, 0.8, 1])  # sağda legend için yer bırak
 
 
 def plot_gantt_by_station(I, L, L_i, y, S, C, title="Station-wise welding schedule"):
     """
     Her istasyon için zaman ekseninde operasyon bloklarını çiz.
+    İSTEK: Aynı job'a ait tüm operasyonlar aynı renkte,
+           yanında bunu simgeleyen panel (legend).
     """
-    plt.figure()
+    fig, ax = plt.subplots(figsize=(10, 6))
     y_ticks = []
     y_labels = []
+
+    # Operasyon -> job map'i
+    op_to_job = {}
+    for j in J:
+        for op in O_j[j]:
+            op_to_job[op] = j
+
+    # Job'lar için renk paleti
+    cmap = plt.cm.get_cmap("tab10")
+    job_colors = {j: cmap((j - 1) % 10) for j in J}
 
     for idx_l, l in enumerate(L):
         y_pos = idx_l
@@ -385,13 +427,29 @@ def plot_gantt_by_station(I, L, L_i, y, S, C, title="Station-wise welding schedu
             if y[i, l].X > 0.5:
                 start = S[i].X
                 finish = C[i].X
-                plt.barh(y_pos, finish - start, left=start)
-                plt.text(start, y_pos, f"{i}", va="center")
+                width = finish - start
 
-    plt.yticks(y_ticks, y_labels)
-    plt.xlabel("Time")
-    plt.title(title)
-    plt.tight_layout()
+                job_of_i = op_to_job.get(i, None)
+                color = job_colors.get(job_of_i, "gray")
+
+                ax.barh(y_pos, width, left=start, color=color)
+                ax.text(start + width / 2, y_pos, f"{i}",
+                        va="center", ha="center", fontsize=7)
+
+    ax.set_yticks(y_ticks)
+    ax.set_yticklabels(y_labels)
+    ax.set_xlabel("Time")
+    ax.set_title(title)
+
+    # Legend / panel: renk -> job
+    handles = [
+        Patch(facecolor=job_colors[j], label=f"Job {j}")
+        for j in J
+    ]
+    ax.legend(handles=handles, title="Jobs",
+              loc="upper right", bbox_to_anchor=(1.25, 1.0))
+    fig.tight_layout(rect=[0, 0, 0.8, 1])  # sağda legend için yer bırak
+
 
 # ===============================
 #  MODEL
@@ -419,7 +477,6 @@ zM = model.addVars(zM_index, vtype=GRB.BINARY, name="zM")
 
 zL_index = [(i, h, l) for i in I for h in I if i != h for l in L]
 zL = model.addVars(zL_index, vtype=GRB.BINARY, name="zL")
-
 
 # times
 S = model.addVars(I, lb=0.0, vtype=GRB.CONTINUOUS, name="S")

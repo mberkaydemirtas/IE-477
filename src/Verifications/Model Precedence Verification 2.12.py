@@ -13,6 +13,7 @@ Verification + visualization:
 
 from gurobipy import Model, GRB, quicksum
 import matplotlib.pyplot as plt
+from matplotlib.patches import Patch  # LEGEND için eklendi
 from check_gurobi import check_solution_gurobi
 
 # ===============================
@@ -359,15 +360,27 @@ def visualize_precedence_matrix(I, Pred_i):
 def plot_gantt_by_machine(I, M, M_i, x, S, C, title="Machine-wise welding schedule"):
     """
     Her makine için zaman ekseninde operasyon bloklarını çiz.
+    GÜNCEL: Aynı job aynı renkte, sağda Jobs legend paneli.
     """
-    plt.figure()
+    fig, ax = plt.subplots(figsize=(8, 4))
     y_ticks = []
     y_labels = []
+
+    # Operasyon -> job map
+    op_to_job = {}
+    for j in J:
+        for op in O_j[j]:
+            op_to_job[op] = j
+
+    # Job renkleri
+    cmap = plt.cm.get_cmap("tab10")
+    job_colors = {j: cmap((j - 1) % 10) for j in J}
 
     for idx_m, m in enumerate(M):
         y_pos = idx_m
         y_ticks.append(y_pos)
-        y_labels.append(f"Machine {m}")
+        mtype_str = "TIG" if machine_type[m] == 1 else "MAG"
+        y_labels.append(f"Machine {m} ({mtype_str})")
 
         for i in I:
             if m not in M_i[i]:
@@ -375,27 +388,57 @@ def plot_gantt_by_machine(I, M, M_i, x, S, C, title="Machine-wise welding schedu
             if x[i, m].X > 0.5:
                 start = S[i].X
                 finish = C[i].X
-                plt.barh(y_pos, finish - start, left=start)
-                plt.text(start, y_pos, f"{i}", va="center")
+                width = finish - start
 
-    plt.yticks(y_ticks, y_labels)
-    plt.xlabel("Time")
-    plt.title(title)
-    plt.tight_layout()
+                job_of_i = op_to_job.get(i, None)
+                color = job_colors.get(job_of_i, "gray")
+
+                ax.barh(y_pos, width, left=start, color=color)
+                ax.text(start + width / 2, y_pos, f"{i}",
+                        va="center", ha="center", fontsize=8)
+
+    ax.set_yticks(y_ticks)
+    ax.set_yticklabels(y_labels)
+    ax.set_xlabel("Time")
+    ax.set_title(title)
+
+    # Legend: renk -> Job
+    handles = [
+        Patch(facecolor=job_colors[j], label=f"Job {j}")
+        for j in J
+    ]
+    ax.legend(handles=handles, title="Jobs",
+              loc="upper right", bbox_to_anchor=(1.25, 1.0))
+
+    fig.tight_layout(rect=[0, 0, 0.8, 1])  # sağda legend için yer
 
 
 def plot_gantt_by_station(I, L, L_i, y, S, C, title="Station-wise welding schedule"):
     """
     Her istasyon için zaman ekseninde operasyon bloklarını çiz.
+    GÜNCEL: Aynı job aynı renkte, big/small istasyon etiketi, sağda Jobs legend paneli.
     """
-    plt.figure()
+    fig, ax = plt.subplots(figsize=(8, 4))
     y_ticks = []
     y_labels = []
 
+    # Operasyon -> job map
+    op_to_job = {}
+    for j in J:
+        for op in O_j[j]:
+            op_to_job[op] = j
+
+    cmap = plt.cm.get_cmap("tab10")
+    job_colors = {j: cmap((j - 1) % 10) for j in J}
+
     for idx_l, l in enumerate(L):
         y_pos = idx_l
+        if l in L_big:
+            label = f"Station {l} (big)"
+        else:
+            label = f"Station {l} (small)"
+        y_labels.append(label)
         y_ticks.append(y_pos)
-        y_labels.append(f"Station {l}")
 
         for i in I:
             if l not in L_i[i]:
@@ -403,13 +446,29 @@ def plot_gantt_by_station(I, L, L_i, y, S, C, title="Station-wise welding schedu
             if y[i, l].X > 0.5:
                 start = S[i].X
                 finish = C[i].X
-                plt.barh(y_pos, finish - start, left=start)
-                plt.text(start, y_pos, f"{i}", va="center")
+                width = finish - start
 
-    plt.yticks(y_ticks, y_labels)
-    plt.xlabel("Time")
-    plt.title(title)
-    plt.tight_layout()
+                job_of_i = op_to_job.get(i, None)
+                color = job_colors.get(job_of_i, "gray")
+
+                ax.barh(y_pos, width, left=start, color=color)
+                ax.text(start + width / 2, y_pos, f"{i}",
+                        va="center", ha="center", fontsize=8)
+
+    ax.set_yticks(y_ticks)
+    ax.set_yticklabels(y_labels)
+    ax.set_xlabel("Time")
+    ax.set_title(title)
+
+    handles = [
+        Patch(facecolor=job_colors[j], label=f"Job {j}")
+        for j in J
+    ]
+    ax.legend(handles=handles, title="Jobs",
+              loc="upper right", bbox_to_anchor=(1.25, 1.0))
+
+    fig.tight_layout(rect=[0, 0, 0.8, 1])
+
 
 # ===============================
 #  MODEL

@@ -22,6 +22,7 @@ SCENARIO: Machine TYPE 2 is overloaded and has only 2 machines
 
 from gurobipy import Model, GRB, quicksum
 import matplotlib.pyplot as plt
+from matplotlib.patches import Patch   # <-- EKLENDİ: legend & bar chart için
 from check_gurobi import check_solution_gurobi
 
 # ===============================
@@ -35,7 +36,7 @@ J = [1, 2, 3, 4]
 I = list(range(1, 31))
 
 # -------------------------------------------------
-# JOB STRUCTURE (aynı)
+# JOB STRUCTURE
 # -------------------------------------------------
 O_j = {
     1: list(range(1, 16)),     # ops 1–15
@@ -66,8 +67,8 @@ machine_type = {
 }
 
 # Her operasyon için UYGUN makine tipleri K_i
-# - Op 1–24: sadece type 2 (darboğaz yaratıyoruz)
-# - Op 25–30: hem type 1 hem type 2 (biraz esnek)
+# - Op 1–24: sadece type 2 (darboğaz)
+# - Op 25–30: hem type 1 hem type 2
 K_i = {}
 for i in I:
     if i <= 24:
@@ -83,7 +84,7 @@ M_i = {
 }
 
 # ===============================
-#  STATIONS (aynen kalıyor)
+#  STATIONS
 # ===============================
 
 L = [1, 2, 3, 4]
@@ -91,7 +92,7 @@ L = [1, 2, 3, 4]
 # Stations (all allowed)
 L_i = {i: [1, 2, 3, 4] for i in I}
 
-# Big/small stations (same as before)
+# Big/small stations
 L_big   = [1, 2, 3]
 L_small = [4]
 
@@ -270,7 +271,7 @@ def visualize_jobs_and_ops(J, O_j, r_j, d_j, g_j, p_j, t_grind_j, t_paint_j):
     plt.title("Number of operations per job")
     plt.tight_layout()
     
-    # 2) Release and due dates per job
+    # 2) Release and due dates per job (eski hali)
     releases = [r_j[j] for j in J]
     dues     = [d_j[j] for j in J]
     
@@ -281,6 +282,31 @@ def visualize_jobs_and_ops(J, O_j, r_j, d_j, g_j, p_j, t_grind_j, t_paint_j):
     plt.ylabel("Time")
     plt.title("Release and due dates per job")
     plt.legend()
+    plt.tight_layout()
+
+
+def visualize_job_operation_membership(J, O_j):
+    """
+    Hangi job hangi global operasyonlara sahip?
+    Y ekseni: Job ID
+    X ekseni: Global operasyon numarası (i)
+    Her nokta: (i, j) yani 'job j, op i' bağlantısı
+    """
+    plt.figure(figsize=(10, 4))
+    
+    for j in J:
+        ops = O_j[j]
+        x_vals = ops
+        y_vals = [j] * len(ops)
+        plt.scatter(x_vals, y_vals, label=f"Job {j}")
+        for i in ops:
+            plt.text(i, j + 0.05, str(i), ha="center", va="bottom", fontsize=7)
+
+    plt.yticks(J, [f"Job {j}" for j in J])
+    plt.xlabel("Global operation index (i)")
+    plt.ylabel("Job")
+    plt.title("Job → Operation membership (which job owns which operations)")
+    plt.grid(True, axis="x", linestyle=":", linewidth=0.5)
     plt.tight_layout()
 
 
@@ -319,13 +345,73 @@ def visualize_precedence_matrix(I, Pred_i):
     plt.tight_layout()
 
 
+def visualize_big_station_needs(J, O_j, beta_i):
+    """
+    Big station requirement tablosu / grafiği:
+
+    - Y ekseni: Job'lar
+    - X ekseni: Job içindeki operasyon pozisyonu (1., 2., 3. ... gibi)
+    - Her operasyon için ayrı bar çiziliyor (aynı job satırı üzerinde yatay).
+    - Her barın içine operasyon numarası yazılıyor.
+    - beta_i = 1 (big zorunlu) ve beta_i = 0 (esnek) için farklı renkler.
+    """
+    print("\n=== BIG STATION REQUIREMENT SUMMARY ===")
+    for j in J:
+        ops = O_j[j]
+        must_big = sum(1 for i in ops if beta_i[i] == 1)
+        flex     = sum(1 for i in ops if beta_i[i] == 0)
+        print(f"Job {j}: must_big = {must_big}, flexible = {flex}, total = {len(ops)}")
+
+    plt.figure()
+    ax = plt.gca()
+
+    for j_idx, j in enumerate(J):
+        ops = O_j[j]
+        for pos_idx, i in enumerate(ops):
+            left = pos_idx
+            width = 0.9
+
+            if beta_i[i] == 1:
+                color = "tab:orange"  # Must be big
+            else:
+                color = "tab:blue"    # Flexible
+
+            ax.barh(j_idx, width, left=left, color=color)
+            ax.text(left + width / 2.0, j_idx, f"{i}",
+                    va="center", ha="center", fontsize=8)
+
+    ax.set_yticks(range(len(J)))
+    ax.set_yticklabels(J)
+    ax.set_xlabel("Operation position within job")
+    ax.set_ylabel("Job")
+    ax.set_title("Big-station requirement per job (operation-level)")
+
+    legend_handles = [
+        Patch(facecolor="tab:blue",  label="Flexible (β_i = 0)"),
+        Patch(facecolor="tab:orange", label="Must be big (β_i = 1)"),
+    ]
+    ax.legend(handles=legend_handles, loc="upper right")
+    plt.tight_layout()
+
+
 def plot_gantt_by_machine(I, M, M_i, x, S, C, title="Machine-wise welding schedule"):
     """
     Her makine için zaman ekseninde operasyon bloklarını çiz.
+    GÜNCEL: Aynı job aynı renk, sağda legend paneli.
     """
-    plt.figure()
+    fig, ax = plt.subplots(figsize=(10, 6))
     y_ticks = []
     y_labels = []
+
+    # Op -> job map
+    op_to_job = {}
+    for j in J:
+        for op in O_j[j]:
+            op_to_job[op] = j
+
+    # Job colors
+    cmap = plt.cm.get_cmap("tab10")
+    job_colors = {j: cmap((j - 1) % 10) for j in J}
 
     for idx_m, m in enumerate(M):
         y_pos = idx_m
@@ -339,27 +425,56 @@ def plot_gantt_by_machine(I, M, M_i, x, S, C, title="Machine-wise welding schedu
             if x[i, m].X > 0.5:
                 start = S[i].X
                 finish = C[i].X
-                plt.barh(y_pos, finish - start, left=start)
-                plt.text(start, y_pos, f"{i}", va="center")
+                width = finish - start
 
-    plt.yticks(y_ticks, y_labels)
-    plt.xlabel("Time")
-    plt.title(title)
-    plt.tight_layout()
+                job_of_i = op_to_job.get(i, None)
+                color = job_colors.get(job_of_i, "gray")
+
+                ax.barh(y_pos, width, left=start, color=color)
+                ax.text(start + width / 2, y_pos, f"{i}",
+                        va="center", ha="center", fontsize=7)
+
+    ax.set_yticks(y_ticks)
+    ax.set_yticklabels(y_labels)
+    ax.set_xlabel("Time")
+    ax.set_title(title)
+
+    # Legend panel
+    handles = [
+        Patch(facecolor=job_colors[j], label=f"Job {j}")
+        for j in J
+    ]
+    ax.legend(handles=handles, title="Jobs",
+              loc="upper right", bbox_to_anchor=(1.25, 1.0))
+    fig.tight_layout(rect=[0, 0, 0.8, 1])
 
 
 def plot_gantt_by_station(I, L, L_i, y, S, C, title="Station-wise welding schedule"):
     """
     Her istasyon için zaman ekseninde operasyon bloklarını çiz.
+    GÜNCEL: Aynı job aynı renk, sağda legend paneli.
     """
-    plt.figure()
+    fig, ax = plt.subplots(figsize=(10, 6))
     y_ticks = []
     y_labels = []
 
+    # Op -> job map
+    op_to_job = {}
+    for j in J:
+        for op in O_j[j]:
+            op_to_job[op] = j
+
+    cmap = plt.cm.get_cmap("tab10")
+    job_colors = {j: cmap((j - 1) % 10) for j in J}
+
     for idx_l, l in enumerate(L):
         y_pos = idx_l
+        # Big/small vurgusu istersen:
+        if l in L_big:
+            y_labels.append(f"Station {l} (big)")
+        else:
+            y_labels.append(f"Station {l} (small)")
         y_ticks.append(y_pos)
-        y_labels.append(f"Station {l}")
 
         for i in I:
             if l not in L_i[i]:
@@ -367,13 +482,28 @@ def plot_gantt_by_station(I, L, L_i, y, S, C, title="Station-wise welding schedu
             if y[i, l].X > 0.5:
                 start = S[i].X
                 finish = C[i].X
-                plt.barh(y_pos, finish - start, left=start)
-                plt.text(start, y_pos, f"{i}", va="center")
+                width = finish - start
 
-    plt.yticks(y_ticks, y_labels)
-    plt.xlabel("Time")
-    plt.title(title)
-    plt.tight_layout()
+                job_of_i = op_to_job.get(i, None)
+                color = job_colors.get(job_of_i, "gray")
+
+                ax.barh(y_pos, width, left=start, color=color)
+                ax.text(start + width / 2, y_pos, f"{i}",
+                        va="center", ha="center", fontsize=7)
+
+    ax.set_yticks(y_ticks)
+    ax.set_yticklabels(y_labels)
+    ax.set_xlabel("Time")
+    ax.set_title(title)
+
+    handles = [
+        Patch(facecolor=job_colors[j], label=f"Job {j}")
+        for j in J
+    ]
+    ax.legend(handles=handles, title="Jobs",
+              loc="upper right", bbox_to_anchor=(1.25, 1.0))
+    fig.tight_layout(rect=[0, 0, 0.8, 1])
+
 
 # ===============================
 #  MODEL
@@ -572,7 +702,9 @@ for j in J:
 
 verify_data(J, I, O_j, M_i, L_i, Pred_i, p_im, r_j, d_j)
 visualize_jobs_and_ops(J, O_j, r_j, d_j, g_j, p_j, t_grind_j, t_paint_j)
+visualize_job_operation_membership(J, O_j)
 visualize_precedence_matrix(I, Pred_i)
+visualize_big_station_needs(J, O_j, beta_i)
 
 # ===============================
 #  SOLVE

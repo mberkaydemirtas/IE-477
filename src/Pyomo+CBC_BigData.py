@@ -22,12 +22,16 @@ J = [1, 2, 3, 4]
 # Operations (80 ops total)
 I = list(range(1, 81))  # 1..80
 
-# JOB → OPERATIONS (20 ops per job)
+# JOB → OPERATIONS
+# Job 1: 18 op
+# Job 2: 22 op
+# Job 3: 19 op
+# Job 4: 21 op   (toplam 80)
 O_j = {
-    1: list(range(1, 21)),        # 1–20
-    2: list(range(21, 41)),       # 21–40
-    3: list(range(41, 61)),       # 41–60
-    4: list(range(61, 81)),       # 61–80
+    1: list(range(1, 19)),     # 1–18
+    2: list(range(19, 41)),    # 19–40
+    3: list(range(41, 60)),    # 41–59
+    4: list(range(60, 81)),    # 60–80
 }
 
 # ===============================
@@ -97,31 +101,86 @@ L_small = [4, 5, 6, 7, 8, 9]
 #  PRECEDENCE – dallı/birleşmeli yapı
 # ===============================
 
+# ===============================
+#  PRECEDENCE – daha heterojen yapı
+# ===============================
+
 Pred_i = {i: [] for i in I}
 
-# Her işin 20 operasyonunu 4'lük bloklara böl:
-# Her blok: ops[s:s+4] = [base, a, b, c]
-# base → a, base → b, a & b → c (merge)
+# 1) Temel: her job içinde chain
+#    i_k-1 → i_k
 for j in J:
-    ops = O_j[j]            # 20 operasyon
-    chunk_size = 4
-    num_chunks = len(ops) // chunk_size  # 20/4 = 5
+    ops = O_j[j]
+    for idx in range(1, len(ops)):
+        prev_op = ops[idx - 1]
+        cur_op  = ops[idx]
+        Pred_i[cur_op].append(prev_op)
 
-    for c in range(num_chunks):
-        s = c * chunk_size
-        base = ops[s]
-        a    = ops[s + 1]
-        b    = ops[s + 2]
-        c_op = ops[s + 3]
+# 2) Ek oklar (fork / merge) – job bazlı heterojen yapı
 
-        # base → a, base → b
-        Pred_i[a].append(base)
-        Pred_i[b].append(base)
+# ---- Job 1: ops 1–18 (biraz dallanma + skip oklar)
+extra_arcs_job1 = [
+    (1, 3), (1, 4),
+    (2, 5),
+    (4, 7),
+    (5, 8),
+    (6, 9),
+    (8, 11),
+    (10, 13),
+    (12, 15),
+    (14, 17),
+]
+for h, i_ in extra_arcs_job1:
+    Pred_i[i_].append(h)
 
-        # a & b → c_op
-        Pred_i[c_op].extend([a, b])
+# ---- Job 2: ops 19–40 (daha uzun ama başka pattern)
+extra_arcs_job2 = [
+    (19, 21), (19, 22),
+    (20, 23),
+    (22, 25),
+    (24, 27),
+    (26, 29),
+    (28, 31),
+    (30, 33),
+    (32, 35),
+    (34, 37),
+    (36, 39),
+]
+for h, i_ in extra_arcs_job2:
+    Pred_i[i_].append(h)
 
-# EK ADIM:
+# ---- Job 3: ops 41–59 (biraz farklı dağılım)
+extra_arcs_job3 = [
+    (41, 43), (41, 44),
+    (42, 45),
+    (44, 47),
+    (46, 49),
+    (48, 51),
+    (50, 53),
+    (52, 55),
+    (54, 57),
+    (55, 58),
+]
+for h, i_ in extra_arcs_job3:
+    Pred_i[i_].append(h)
+
+# ---- Job 4: ops 60–80 (son job en büyük, başka pattern)
+extra_arcs_job4 = [
+    (60, 62), (60, 63),
+    (61, 64),
+    (63, 66),
+    (65, 68),
+    (67, 70),
+    (69, 72),
+    (71, 74),
+    (73, 76),
+    (75, 78),
+    (77, 80),
+]
+for h, i_ in extra_arcs_job4:
+    Pred_i[i_].append(h)
+
+# 3) EK ADIM:
 # Her job'un SON operasyonu, o jobtaki TÜM operasyonlardan sonra gelsin
 for j in J:
     ops = O_j[j]
@@ -132,6 +191,7 @@ for j in J:
             continue
         preds.add(i_op)
     Pred_i[last] = list(preds)
+
 
 # ===============================
 #  PROCESSING TIMES p_im

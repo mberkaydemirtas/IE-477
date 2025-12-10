@@ -1,11 +1,3 @@
-# -*- coding: utf-8 -*-
-"""
-Created on Tue Dec  2 18:57:28 2025
-
-@author: Dell
-"""
-
-#!/usr/bin/env python3
 # -- coding: utf-8 --
 """
 Welding Shop Scheduling – LARGE EXAMPLE (8 jobs, 30 ops)
@@ -20,10 +12,13 @@ Verification + visualization:
 SCENARIO: Most operations require BIG stations
 """
 
+#!/usr/bin/env python3
+# -- coding: utf-8 --
+
 from gurobipy import Model, GRB, quicksum
 import matplotlib.pyplot as plt
+from matplotlib.patches import Patch
 from check_gurobi import check_solution_gurobi
-
 
 # ===============================
 #  DATA (LARGE EXAMPLE – 8 jobs, 30 ops)
@@ -92,7 +87,7 @@ M_i = {
     for i in I
 }
 
-# ==== STATIONS (BURAYA DOKUNMADIK) ====
+# ==== STATIONS ====
 
 L = [1, 2, 3, 4]
 
@@ -377,7 +372,7 @@ def plot_gantt_by_machine(I, M, M_i, x, S, C, title="Machine-wise welding schedu
                 start = S[i].X
                 finish = C[i].X
                 plt.barh(y_pos, finish - start, left=start)
-                plt.text(start, y_pos, f"{i}", va="center")
+                plt.text(start, y_pos, f"{i}", va="center", fontsize=7)
 
     plt.yticks(y_ticks, y_labels)
     plt.xlabel("Time")
@@ -386,14 +381,39 @@ def plot_gantt_by_machine(I, M, M_i, x, S, C, title="Machine-wise welding schedu
 
 
 def plot_gantt_by_station(I, L, L_i, y, S, C, title="Station-wise welding schedule"):
-    plt.figure()
+    """
+    Station-wise Gantt:
+    - Solda: Gantt chart
+    - Sağda: Job Color Key paneli (hangi renk hangi job)
+    """
+    fig, (ax, ax_leg) = plt.subplots(
+        1, 2,
+        figsize=(14, 6),
+        gridspec_kw={"width_ratios": [4, 1]}
+    )
+
     y_ticks = []
     y_labels = []
 
+    # Operasyon -> job map'i
+    op_to_job = {}
+    for j in J:
+        for op in O_j[j]:
+            op_to_job[op] = j
+
+    # Job'lar için renk paleti
+    cmap = plt.cm.get_cmap("tab10")
+    job_colors = {j: cmap((j - 1) % 10) for j in J}
+
+    # ---- SOL: Gantt ----
     for idx_l, l in enumerate(L):
         y_pos = idx_l
         y_ticks.append(y_pos)
-        y_labels.append(f"Station {l}")
+
+        if l == 1:
+            y_labels.append("Station 1 (big station)")
+        else:
+            y_labels.append(f"Station {l}")
 
         for i in I:
             if l not in L_i[i]:
@@ -401,21 +421,68 @@ def plot_gantt_by_station(I, L, L_i, y, S, C, title="Station-wise welding schedu
             if y[i, l].X > 0.5:
                 start = S[i].X
                 finish = C[i].X
-                plt.barh(y_pos, finish - start, left=start)
-                plt.text(start, y_pos, f"{i}", va="center")
+                width = finish - start
 
-    plt.yticks(y_ticks, y_labels)
-    plt.xlabel("Time")
-    plt.title(title)
-    plt.tight_layout()
-    
+                job_of_i = op_to_job[i]
+                color = job_colors[job_of_i]
+
+                ax.barh(y_pos, width, left=start, color=color)
+                # Bar içine sadece operasyon numarasını yaz
+                ax.text(start + width / 2, y_pos, f"{i}",
+                        ha="center", va="center", fontsize=7)
+
+    ax.set_yticks(y_ticks)
+    ax.set_yticklabels(y_labels)
+    ax.set_xlabel("Time")
+    ax.set_title(title)
+    ax.grid(True, linestyle="--", alpha=0.3)
+
+    # ---- SAĞ: Job Color Key paneli ----
+    ax_leg.set_axis_off()
+    ax_leg.set_title("Job Color Key", fontsize=12, pad=10)
+
+    # Paneli aksis koordinatlarında kullanmak için
+    # 0–1 arası normalize edilmiş koordinatlar
+    y0 = 0.9
+    dy = 0.7 / max(len(J), 1)  # boşluklara göre ölçekle
+
+    for idx, j in enumerate(J):
+        y_pos = y0 - idx * dy
+        if y_pos < 0.05:
+            break  # taşmasın, yeterince job gösterdik
+
+        # Renkli kare
+        rect = plt.Rectangle(
+            (0.05, y_pos - 0.03),
+            0.12,
+            0.06,
+            transform=ax_leg.transAxes,
+            facecolor=job_colors[j],
+            edgecolor="black"
+        )
+        ax_leg.add_patch(rect)
+
+        # Yanına yazı
+        ax_leg.text(
+            0.22, y_pos,
+            f"Job {j}",
+            transform=ax_leg.transAxes,
+            va="center", ha="left",
+            fontsize=10
+        )
+
+    fig.tight_layout()
+
+
 def visualize_big_station_needs(J, O_j, beta_i):
     """
-    For each job:
-    - counts how many operations MUST use big station (beta_i = 1)
-    - counts how many operations are flexible (beta_i = 0)
+    Big station requirement tablosu / grafiği:
 
-    Then draws a stacked bar chart.
+    - Y ekseni: Job'lar
+    - X ekseni: Job içindeki operasyon pozisyonu (1., 2., 3. ... gibi)
+    - Her operasyon için ayrı bar çiziliyor (aynı job satırı üzerinde yatay).
+    - Her barın içine operasyon numarası yazılıyor.
+    - beta_i = 1 (big zorunlu) ve beta_i = 0 (esnek) için farklı renkler.
     """
     job_ids = []
     must_big_counts = []
@@ -433,20 +500,42 @@ def visualize_big_station_needs(J, O_j, beta_i):
     for j, mb, fx in zip(job_ids, must_big_counts, flexible_counts):
         print(f"Job {j}: must_big = {mb}, flexible = {fx}, total = {mb+fx}")
 
-    # Stacked bar chart
-    import numpy as np
-    x = np.arange(len(job_ids))
-
+    # Yatay bar grafiği: job'lar y ekseninde, operasyon "pozisyonları" x ekseninde
     plt.figure()
-    plt.bar(x, flexible_counts, label="Flexible (β_i = 0)")
-    plt.bar(x, must_big_counts, bottom=flexible_counts, label="Must be big (β_i = 1)")
-    plt.xticks(x, job_ids)
-    plt.xlabel("Job")
-    plt.ylabel("Number of operations")
-    plt.title("Big-station requirement per job")
-    plt.legend()
-    plt.tight_layout()
+    ax = plt.gca()
 
+    for j_idx, j in enumerate(J):
+        ops = O_j[j]
+        for pos_idx, i in enumerate(ops):
+            # Her operasyon için yatay bir bar: x = pos_idx .. pos_idx+1
+            left = pos_idx
+            width = 0.9
+
+            # beta_i'ye göre renk (zorunlu big vs esnek)
+            if beta_i[i] == 1:
+                color = "tab:orange"
+            else:
+                color = "tab:blue"
+
+            ax.barh(j_idx, width, left=left, color=color)
+            # Barın içine operasyon numarasını yaz
+            ax.text(left + width / 2.0, j_idx, f"{i}",
+                    va="center", ha="center", fontsize=8)
+
+    ax.set_yticks(range(len(J)))
+    ax.set_yticklabels(J)
+    ax.set_xlabel("Operation position within job")
+    ax.set_ylabel("Job")
+    ax.set_title("Big-station requirement per job (operation-level)")
+
+    # Legend (esnek vs big zorunlu)
+    legend_handles = [
+        Patch(facecolor="tab:blue",  label="Flexible (β_i = 0)"),
+        Patch(facecolor="tab:orange", label="Must be big (β_i = 1)")
+    ]
+    ax.legend(handles=legend_handles, loc="upper right")
+
+    plt.tight_layout()
 
 # ===============================
 #  MODEL
@@ -474,7 +563,6 @@ zM = model.addVars(zM_index, vtype=GRB.BINARY, name="zM")
 
 zL_index = [(i, h, l) for i in I for h in I if i != h for l in L]
 zL = model.addVars(zL_index, vtype=GRB.BINARY, name="zL")
-
 
 # times
 S = model.addVars(I, lb=0.0, vtype=GRB.CONTINUOUS, name="S")
@@ -647,7 +735,6 @@ verify_data(J, I, O_j, M_i, L_i, Pred_i, p_im, r_j, d_j)
 visualize_jobs_and_ops(J, O_j, r_j, d_j, g_j, p_j, t_grind_j, t_paint_j)
 visualize_precedence_matrix(I, Pred_i)
 visualize_big_station_needs(J, O_j, beta_i)
-
 
 # ===============================
 #  SOLVE
