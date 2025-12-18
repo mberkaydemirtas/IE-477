@@ -1,0 +1,62 @@
+{
+  "scenario_id": "04",
+  "scenario_name": "Scenario 04 — Urgent Job Shock (Tight Due Date)",
+  "plan_start_iso": "2025-12-18T05:00:00+00:00",
+  "plan_calendar": {
+    "mode": "realtime_anchor",
+    "utc_offset": "+03:00",
+    "workdays": [0, 1, 2, 3, 4],
+    "shift_start_local": "08:00",
+    "workday_hours": 8.0,
+    "lunch_break_included": false
+  },
+
+  "mode": "optimize",
+
+  "overrides": {},
+
+  "disruptions": {
+    "unavailable_machines": [],
+    "unavailable_stations": []
+  },
+
+  "urgent_job": {
+    "job_id": 99,
+
+    "release_time_mode": "t0",
+    "due_time_mode": "t0_plus",
+    "due_time_hours": 0.5,
+
+    "ops": [
+      {
+        "op_id": 1001,
+        "processing_time_by_machine": {
+          "2": 50.0,
+          "3": 40.0,
+          "4": 50.5
+        },
+        "feasible_stations": [1, 2, 3, 4, 5, 6, 7, 8, 9],
+        "beta_big_station_required": false
+      },
+      {
+        "op_id": 1002,
+        "processing_time_by_machine": {
+          "2": 60.0,
+          "3": 70.5,
+          "4": 80.0
+        },
+        "feasible_stations": [1, 2, 3, 4, 5, 6, 7, 8, 9],
+        "beta_big_station_required": true
+      }
+    ],
+
+    "precedence_edges": [
+      [1001, 1002]
+    ],
+
+    "post_ops": {
+      "grinding_required": false,
+      "painting_required": false
+    }
+  }
+}

@@ -1,0 +1,460 @@
+{
+  "t0": 6.2444765477777775,
+  "sets": {
+    "I_done": [
+      1
+    ],
+    "I_run": [
+      2,
+      4,
+      8
+    ],
+    "I_free": [
+      3,
+      5,
+      6,
+      7,
+      9,
+      10,
+      11,
+      12,
+      13,
+      14,
+      15,
+      16,
+      17,
+      18,
+      19,
+      20,
+      21,
+      22,
+      23,
+      24,
+      25,
+      26,
+      27,
+      28,
+      29,
+      30
+    ]
+  },
+  "objective": {
+    "T_max": 44.4,
+    "C_max": 86.0
+  },
+  "urgent": {
+    "job_id": 99,
+    "ops": [
+      1001,
+      1002
+    ],
+    "C_final": 58.64447654777287,
+    "T": 44.4,
+    "d": 14.244476547777777
+  },
+  "keep_decisions": {},
+  "schedule": [
+    {
+      "op_id": 1,
+      "op_label": "1",
+      "job_id": 1,
+      "start": 0.0,
+      "finish": 6.0,
+      "machine": 1,
+      "station": 8
+    },
+    {
+      "op_id": 2,
+      "op_label": "2",
+      "job_id": 1,
+      "start": 6.0,
+      "finish": 11.5,
+      "machine": 2,
+      "station": 8
+    },
+    {
+      "op_id": 3,
+      "op_label": "3",
+      "job_id": 1,
+      "start": 11.5,
+      "finish": 17.5,
+      "machine": 1,
+      "station": 3
+    },
+    {
+      "op_id": 4,
+      "op_label": "4",
+      "job_id": 2,
+      "start": 2.0,
+      "finish": 13.5,
+      "machine": 10,
+      "station": 4
+    },
+    {
+      "op_id": 5,
+      "op_label": "5",
+      "job_id": 2,
+      "start": 17.5,
+      "finish": 20.5,
+      "machine": 1,
+      "station": 4
+    },
+    {
+      "op_id": 6,
+      "op_label": "6",
+      "job_id": 2,
+      "start": 13.5,
+      "finish": 18.0,
+      "machine": 2,
+      "station": 8
+    },
+    {
+      "op_id": 7,
+      "op_label": "7",
+      "job_id": 2,
+      "start": 20.5,
+      "finish": 25.5,
+      "machine": 1,
+      "station": 3
+    },
+    {
+      "op_id": 8,
+      "op_label": "8",
+      "job_id": 3,
+      "start": 4.0,
+      "finish": 11.0,
+      "machine": 3,
+      "station": 7
+    },
+    {
+      "op_id": 9,
+      "op_label": "9",
+      "job_id": 3,
+      "start": 25.5,
+      "finish": 32.5,
+      "machine": 1,
+      "station": 4
+    },
+    {
+      "op_id": 10,
+      "op_label": "10",
+      "job_id": 3,
+      "start": 11.0,
+      "finish": 18.0,
+      "machine": 9,
+      "station": 7
+    },
+    {
+      "op_id": 11,
+      "op_label": "11",
+      "job_id": 3,
+      "start": 32.5,
+      "finish": 36.5,
+      "machine": 1,
+      "station": 4
+    },
+    {
+      "op_id": 12,
+      "op_label": "12",
+      "job_id": 3,
+      "start": 36.5,
+      "finish": 45.0,
+      "machine": 8,
+      "station": 3
+    },
+    {
+      "op_id": 13,
+      "op_label": "13",
+      "job_id": 4,
+      "start": 36.5,
+      "finish": 42.5,
+      "machine": 1,
+      "station": 2
+    },
+    {
+      "op_id": 14,
+      "op_label": "14",
+      "job_id": 4,
+      "start": 42.5,
+      "finish": 52.5,
+      "machine": 7,
+      "station": 2
+    },
+    {
+      "op_id": 15,
+      "op_label": "15",
+      "job_id": 5,
+      "start": 42.5,
+      "finish": 45.5,
+      "machine": 1,
+      "station": 5
+    },
+    {
+      "op_id": 16,
+      "op_label": "16",
+      "job_id": 5,
+      "start": 45.5,
+      "finish": 50.5,
+      "machine": 3,
+      "station": 5
+    },
+    {
+      "op_id": 17,
+      "op_label": "17",
+      "job_id": 5,
+      "start": 45.5,
+      "finish": 50.5,
+      "machine": 1,
+      "station": 4
+    },
+    {
+      "op_id": 18,
+      "op_label": "18",
+      "job_id": 5,
+      "start": 50.5,
+      "finish": 57.5,
+      "machine": 3,
+      "station": 3
+    },
+    {
+      "op_id": 19,
+      "op_label": "19",
+      "job_id": 6,
+      "start": 50.5,
+      "finish": 57.5,
+      "machine": 1,
+      "station": 4
+    },
+    {
+      "op_id": 20,
+      "op_label": "20",
+      "job_id": 6,
+      "start": 9.5,
+      "finish": 15.0,
+      "machine": 6,
+      "station": 6
+    },
+    {
+      "op_id": 21,
+      "op_label": "21",
+      "job_id": 6,
+      "start": 57.5,
+      "finish": 61.5,
+      "machine": 1,
+      "station": 3
+    },
+    {
+      "op_id": 22,
+      "op_label": "22",
+      "job_id": 7,
+      "start": 18.0,
+      "finish": 25.5,
+      "machine": 6,
+      "station": 7
+    },
+    {
+      "op_id": 23,
+      "op_label": "23",
+      "job_id": 7,
+      "start": 61.5,
+      "finish": 67.5,
+      "machine": 1,
+      "station": 5
+    },
+    {
+      "op_id": 24,
+      "op_label": "24",
+      "job_id": 7,
+      "start": 59.0,
+      "finish": 70.5,
+      "machine": 10,
+      "station": 7
+    },
+    {
+      "op_id": 25,
+      "op_label": "25",
+      "job_id": 7,
+      "start": 67.5,
+      "finish": 70.5,
+      "machine": 1,
+      "station": 4
+    },
+    {
+      "op_id": 26,
+      "op_label": "26",
+      "job_id": 7,
+      "start": 72.3,
+      "finish": 80.8,
+      "machine": 10,
+      "station": 3
+    },
+    {
+      "op_id": 27,
+      "op_label": "27",
+      "job_id": 8,
+      "start": 70.5,
+      "finish": 75.5,
+      "machine": 1,
+      "station": 7
+    },
+    {
+      "op_id": 28,
+      "op_label": "28",
+      "job_id": 8,
+      "start": 71.0,
+      "finish": 82.5,
+      "machine": 12,
+      "station": 8
+    },
+    {
+      "op_id": 29,
+      "op_label": "29",
+      "job_id": 8,
+      "start": 75.5,
+      "finish": 82.5,
+      "machine": 1,
+      "station": 7
+    },
+    {
+      "op_id": 30,
+      "op_label": "30",
+      "job_id": 8,
+      "start": 82.5,
+      "finish": 86.0,
+      "machine": 2,
+      "station": 3
+    },
+    {
+      "op_id": 1001,
+      "op_label": "1001",
+      "job_id": 99,
+      "start": 6.2444765477777775,
+      "finish": 12.74447654777778,
+      "machine": 4,
+      "station": 9
+    },
+    {
+      "op_id": 1002,
+      "op_label": "1002",
+      "job_id": 99,
+      "start": 53.644476547772854,
+      "finish": 58.64447654777287,
+      "machine": 4,
+      "station": 2
+    },
+    {
+      "op_id": 1003,
+      "op_label": "2(cont)",
+      "job_id": 1,
+      "start": 11.5,
+      "finish": 0.0,
+      "machine": null,
+      "station": null
+    },
+    {
+      "op_id": 1004,
+      "op_label": "4(cont)",
+      "job_id": 2,
+      "start": 13.5,
+      "finish": 0.0,
+      "machine": null,
+      "station": null
+    },
+    {
+      "op_id": 1005,
+      "op_label": "8(cont)",
+      "job_id": 3,
+      "start": 11.0,
+      "finish": 0.0,
+      "machine": null,
+      "station": null
+    }
+  ],
+  "changed_ops": [
+    {
+      "op_id": 6,
+      "old_start": 13.5,
+      "old_finish": 19.0,
+      "new_start": 13.5,
+      "new_finish": 18.0
+    },
+    {
+      "op_id": 10,
+      "old_start": 11.0,
+      "old_finish": 16.5,
+      "new_start": 11.0,
+      "new_finish": 18.0
+    },
+    {
+      "op_id": 12,
+      "old_start": 36.5,
+      "old_finish": 43.0,
+      "new_start": 36.5,
+      "new_finish": 45.0
+    },
+    {
+      "op_id": 14,
+      "old_start": 42.5,
+      "old_finish": 50.5,
+      "new_start": 42.5,
+      "new_finish": 52.5
+    },
+    {
+      "op_id": 16,
+      "old_start": 45.5,
+      "old_finish": 51.0,
+      "new_start": 45.5,
+      "new_finish": 50.5
+    },
+    {
+      "op_id": 18,
+      "old_start": 51.0,
+      "old_finish": 59.0,
+      "new_start": 50.5,
+      "new_finish": 57.5
+    },
+    {
+      "op_id": 20,
+      "old_start": 11.0,
+      "old_finish": 19.5,
+      "new_start": 9.5,
+      "new_finish": 15.0
+    },
+    {
+      "op_id": 22,
+      "old_start": 19.5,
+      "old_finish": 29.5,
+      "new_start": 18.0,
+      "new_finish": 25.5
+    },
+    {
+      "op_id": 24,
+      "old_start": 29.5,
+      "old_finish": 39.0,
+      "new_start": 59.0,
+      "new_finish": 70.5
+    },
+    {
+      "op_id": 26,
+      "old_start": 70.5,
+      "old_finish": 77.0,
+      "new_start": 72.3,
+      "new_finish": 80.8
+    },
+    {
+      "op_id": 28,
+      "old_start": 59.0,
+      "old_finish": 67.0,
+      "new_start": 71.0,
+      "new_finish": 82.5
+    }
+  ],
+  "scenario_name": "Scenario 03 — Station Capacity Disruption (Big Station Offline)",
+  "mode": "continue",
+  "disruptions": {
+    "unavailable_machines": [],
+    "unavailable_stations": [
+      1
+    ]
+  }
+}

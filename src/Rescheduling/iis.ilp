@@ -1,0 +1,12 @@
+\ Model Reschedule_DisruptionOnly_copy
+\ LP format - for model browsing. Use MPS format to capture full model detail.
+\ Signature: 0xf1dc94bea0527fed
+Minimize
+ 
+Subject To
+ assign_M_3: x[3,1] = 1
+ unavailM_3_1: x[3,1] = 0
+Bounds
+Binaries
+ x[3,1]
+End

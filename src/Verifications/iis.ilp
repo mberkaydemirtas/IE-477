@@ -1,0 +1,20 @@
+\ Model Reschedule_copy
+\ LP format - for model browsing. Use MPS format to capture full model detail.
+\ Signature: 0xe4b715b4c977545b
+Minimize
+  0 keep_running[15]
+Subject To
+ ptime_lb_15_1: - 1000 x[15,1] - S[15] + C[15] >= -997
+ prec_15_104: S[104] - C[15] >= 0
+ ind_keepC_15: keep_running[15] = 1 -> C[15] = 25
+ ind_preemptS_15: keep_running[15] = 0 -> S[15] = 22
+ ind_preemptC_15: keep_running[15] = 0 -> C[15] = 24
+ GC4: keep_running[15] = 0 -> x[15,1] = 1
+ GC16: keep_running[15] = 1 -> S[104] = 24
+Bounds
+ S[15] free
+ S[104] free
+ C[15] free
+Binaries
+ x[15,1] keep_running[15]
+End

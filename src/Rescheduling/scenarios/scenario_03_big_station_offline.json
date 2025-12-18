@@ -1,0 +1,10 @@
+{
+  "name": "Scenario 03 — Station Capacity Disruption (Big Station Offline)",
+  "baseline_output": "baseline_solution_03.json",
+  "reschedule_output": "reschedule_solution_03.json",
+  "reschedule": {
+    "mode": "continue",
+    "unavailable_machines": [],
+    "unavailable_stations": [1]
+  }
+}

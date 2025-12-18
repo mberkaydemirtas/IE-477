@@ -1,0 +1,10 @@
+{
+  "name": "Scenario 02 — Machine Breakdown with Preemption (Optimize Mode)",
+  "baseline_output": "baseline_solution_02.json",
+  "reschedule_output": "reschedule_solution_02.json",
+  "reschedule": {
+    "mode": "optimize",
+    "unavailable_machines": [1],
+    "unavailable_stations": []
+  }
+}

@@ -1,0 +1,17 @@
+{
+  "name": "Scenario 06 — Due Date Revision (Customer Pull-In)",
+  "baseline_output": "baseline_solution_06.json",
+  "reschedule_output": "reschedule_solution_06.json",
+  "overrides": {
+    "d_j": {
+      "2": 2.5,
+      "3": 14.0,
+      "7": 18.0
+    }
+  },
+  "reschedule": {
+    "mode": "optimize",
+    "unavailable_machines": [],
+    "unavailable_stations": []
+  }
+}

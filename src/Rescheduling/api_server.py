@@ -7,7 +7,7 @@ from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, Field
 from typing import List, Literal, Optional
 
-from solver_core import (
+from Rescheduling.solver_core import (
     make_base_data,
     solve_baseline,
     solve_reschedule,
