@@ -17,6 +17,7 @@ def _load_json(path: str) -> dict:
 
 
 def _save_json(path: str, obj: dict):
+    os.makedirs(os.path.dirname(path), exist_ok=True)
     with open(path, "w", encoding="utf-8") as f:
         json.dump(obj, f, indent=2, ensure_ascii=False)
 

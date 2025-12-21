@@ -1,8 +1,10 @@
 #!/usr/bin/env python3
-# -- coding: utf-8 --
+# -*- coding: utf-8 -*-
 
 from gurobipy import Model, GRB, quicksum
 from datetime import datetime, timezone, timedelta, time as dtime
+import math
+from typing import Dict, List, Tuple, Optional
 
 
 # ==========================================================
@@ -196,6 +198,241 @@ def extract_assignment_for_ops(I, M_i, L_i, x, y):
 
 
 # ==========================================================
+#  HEURISTIC (ATCS list scheduling)
+# ==========================================================
+
+def _avg_min_p(I: List[int], M_i: Dict[int, List[int]], p_im: Dict[Tuple[int, int], float]) -> float:
+    vals = []
+    for i in I:
+        mi = M_i.get(i, [])
+        if not mi:
+            continue
+        vals.append(min(p_im[(i, m)] for m in mi))
+    return float(sum(vals) / max(1, len(vals)))
+
+
+def _atcs_priority(i: int, t: float, job_of: Dict[int, int],
+                   d_j: Dict[int, float],
+                   M_i: Dict[int, List[int]],
+                   p_im: Dict[Tuple[int, int], float],
+                   pbar: float,
+                   k1: float = 2.0) -> float:
+    """
+    ATCS(i,t) = 1/pi * exp( - max{ d_job(i) - pi - t, 0 } / (k1 * pbar) )
+    pi = min_m p_im
+    """
+    mi = M_i[i]
+    pi = min(p_im[(i, m)] for m in mi)
+    j = job_of[i]
+    slack = max(d_j[j] - pi - t, 0.0)
+    return (1.0 / max(1e-9, pi)) * math.exp(-slack / max(1e-9, (k1 * pbar)))
+
+
+def heuristic_schedule(
+    data: dict,
+    fixed_ops: Optional[Dict[int, dict]] = None,
+    start_time_floor: float = 0.0,
+    k1: float = 2.0,
+    unavailable_machines: Optional[List[int]] = None,
+    unavailable_stations: Optional[List[int]] = None,
+) -> Tuple[List[dict], dict]:
+    """
+    Produces a feasible schedule (no-overlap on machines/stations) by list scheduling.
+
+    fixed_ops: {op_id: {"start","finish","machine","station","job_id","op_label"}}
+              Fixed ops block their machine/station until finish time.
+
+    start_time_floor: all non-fixed ops start >= this.
+
+    unavailable_machines/stations:
+      - Heuristic will NEVER assign new operations to these resources (t0 sonrası).
+
+    Returns:
+      (schedule_rows, objectives)
+      objectives = {"T_max","C_max","C_final":{j:...},"T":{j:...}}
+    """
+    fixed_ops = fixed_ops or {}
+    badM = set(int(x) for x in (unavailable_machines or []))
+    badL = set(int(x) for x in (unavailable_stations or []))
+
+    J = list(data["J"])
+    I = [int(x) for x in data["I"]]
+    O_j = data["O_j"]
+    M_i = data["M_i"]
+    L_i = data["L_i"]
+    Pred_i = data["Pred_i"]
+    p_im = data["p_im"]
+    r_j = data["r_j"]
+    d_j = data["d_j"]
+    g_j = data["g_j"]
+    p_j = data["p_j"]
+    t_grind_j = data["t_grind_j"]
+    t_paint_j = data["t_paint_j"]
+    beta_i = data["beta_i"]
+    L_big = set(data.get("L_big", []))
+    L_small = set(data.get("L_small", []))
+
+    job_of = op_to_job_map(O_j)
+
+    mach_av = {}   # m -> time
+    stat_av = {}   # l -> time
+
+    S = {}
+    C = {}
+    chosen_m = {}
+    chosen_l = {}
+
+    schedule = []
+    for op_id, row in fixed_ops.items():
+        i = int(op_id)
+        S[i] = float(row["start"])
+        C[i] = float(row["finish"])
+        chosen_m[i] = row.get("machine")
+        chosen_l[i] = row.get("station")
+
+        m = chosen_m[i]
+        l = chosen_l[i]
+        if m is not None:
+            mach_av[int(m)] = max(mach_av.get(int(m), 0.0), C[i])
+        if l is not None:
+            stat_av[int(l)] = max(stat_av.get(int(l), 0.0), C[i])
+
+        schedule.append({
+            "op_id": i,
+            "op_label": str(row.get("op_label", row.get("op_id", i))),
+            "job_id": int(row.get("job_id", job_of.get(i, -1))),
+            "start": float(S[i]),
+            "finish": float(C[i]),
+            "machine": (int(m) if m is not None else None),
+            "station": (int(l) if l is not None else None),
+        })
+
+    def preds_done_time(i: int) -> float:
+        preds = Pred_i.get(i, [])
+        if not preds:
+            return 0.0
+        return max(C.get(int(h), 0.0) for h in preds)
+
+    remaining = set(I) - set(int(x) for x in fixed_ops.keys())
+    pbar = _avg_min_p(I, M_i, p_im)
+
+    while remaining:
+        eligible = []
+        for i in list(remaining):
+            j = job_of.get(i, None)
+            if j is None:
+                continue
+
+            preds = Pred_i.get(i, [])
+            if any(int(h) not in C for h in preds):
+                continue
+
+            ready = preds_done_time(i)
+            ready = max(ready, float(start_time_floor))
+
+            if i == O_j[j][0]:
+                ready = max(ready, float(r_j[j]))
+
+            eligible.append((i, ready))
+
+        if not eligible:
+            raise RuntimeError("Heuristic deadlock: no eligible operations. Check precedence (cycle?)")
+
+        best_i = None
+        best_score = -1e100
+        best_ready = None
+        for (i, ready) in eligible:
+            score = _atcs_priority(
+                i=i, t=ready,
+                job_of=job_of, d_j=d_j, M_i=M_i, p_im=p_im, pbar=pbar, k1=k1
+            )
+            if score > best_score:
+                best_score = score
+                best_i = i
+                best_ready = ready
+
+        i = int(best_i)
+        ready = float(best_ready)
+
+        feasible_stations = list(L_i[i])
+
+        if beta_i.get(i, 0) == 1:
+            feasible_stations = [l for l in feasible_stations if int(l) in L_big]
+
+        feasible_stations = [int(l) for l in feasible_stations if int(l) not in badL]
+        if not feasible_stations:
+            raise RuntimeError(f"Heuristic: op {i} has no feasible station after filtering (big/closed).")
+
+        best = None  # (finish, start, m, l)
+        for m in M_i[i]:
+            m = int(m)
+            if m in badM:
+                continue
+
+            p = float(p_im[(i, m)])
+            m_ready = mach_av.get(m, 0.0)
+
+            for l in feasible_stations:
+                l = int(l)
+                l_ready = stat_av.get(l, 0.0)
+
+                s = max(ready, m_ready, l_ready)
+                f = s + p
+
+                cand = (f, s, m, l)
+                if best is None or cand < best:
+                    best = cand
+
+        if best is None:
+            raise RuntimeError(f"Heuristic: no feasible (machine,station) for op {i} after filtering.")
+
+        f, s, m, l = best
+
+        S[i] = float(s)
+        C[i] = float(f)
+        chosen_m[i] = int(m)
+        chosen_l[i] = int(l)
+        mach_av[m] = float(f)
+        stat_av[l] = float(f)
+
+        schedule.append({
+            "op_id": int(i),
+            "op_label": str(int(i)),
+            "job_id": int(job_of.get(i, -1)),
+            "start": float(s),
+            "finish": float(f),
+            "machine": int(m),
+            "station": int(l),
+        })
+
+        remaining.remove(i)
+
+    C_weld = {int(j): 0.0 for j in J}
+    for j in J:
+        for op in O_j[j]:
+            C_weld[j] = max(C_weld[j], C[int(op)])
+
+    C_final = {}
+    T = {}
+    for j in J:
+        C_final[j] = float(C_weld[j] + g_j[j] * t_grind_j[j] + p_j[j] * t_paint_j[j])
+        T[j] = max(0.0, C_final[j] - float(d_j[j]))
+
+    Tmax = max(T.values()) if T else 0.0
+    Cmax = max(C_final.values()) if C_final else 0.0
+
+    schedule.sort(key=lambda r: (float(r["start"]), float(r["finish"]), int(r["op_id"])))
+
+    objectives = {
+        "T_max": float(Tmax),
+        "C_max": float(Cmax),
+        "C_final": {int(j): float(C_final[j]) for j in C_final},
+        "T": {int(j): float(T[j]) for j in T},
+    }
+    return schedule, objectives
+
+
+# ==========================================================
 #  DATA BUILD
 # ==========================================================
 
@@ -218,12 +455,10 @@ def make_base_data(overrides: dict | None = None):
 
     M = list(range(1, 13))
 
-    # default: Only Machine 1,2 is TIG(1), others MAG(2)
     machine_type = {m: 2 for m in M}
     machine_type[1] = 1
     machine_type[2] = 1
 
-    # Odd ops -> TIG(1), Even ops -> MAG(2)
     K_i = {i: ([1] if (i % 2 == 1) else [2]) for i in I}
     M_i = {i: [m for m in M if machine_type[m] in K_i[i]] for i in I}
 
@@ -232,7 +467,6 @@ def make_base_data(overrides: dict | None = None):
     L_big = [1, 2, 3]
     L_small = [4, 5, 6, 7, 8, 9]
 
-    # Precedence
     Pred_i = {i: [] for i in I}
     Pred_i[2]  = [1]
     Pred_i[3]  = [1]
@@ -253,7 +487,6 @@ def make_base_data(overrides: dict | None = None):
     Pred_i[25] = [23]
     Pred_i[26] = [24]
 
-    # "last depends on all in job"
     for j in J:
         ops = O_j[j]
         last = ops[-1]
@@ -263,7 +496,6 @@ def make_base_data(overrides: dict | None = None):
                 preds.add(op)
         Pred_i[last] = list(preds)
 
-    # Processing times
     p_im = {}
     for i in I:
         for m in M_i[i]:
@@ -271,20 +503,16 @@ def make_base_data(overrides: dict | None = None):
             machine_add = (m - 1) * 0.5
             p_im[(i, m)] = float(base + machine_add)
 
-    # Ensure op1 is long on Machine 1
     if (1, 1) in p_im:
         p_im[(1, 1)] = 6.0
 
-    # Releases
     release_times = [0.0, 2.0, 4.0, 6.0, 8.0, 10.0, 12.0, 14.0]
     r_j = {j: release_times[idx] for idx, j in enumerate(J)}
 
-    # Due dates
     base_slack = 18.0
     slope = 1.2
     d_j = {j: float(r_j[j] + base_slack + slope * j) for j in J}
 
-    # grind/paint flags and times
     g_j = {j: (1 if idx % 2 == 0 else 0) for idx, j in enumerate(J)}
     p_j = {j: (1 if idx in [0, 1, 2] else 0) for idx, j in enumerate(J)}
 
@@ -295,7 +523,6 @@ def make_base_data(overrides: dict | None = None):
         t_grind_j[j] = 2.0 + (last_op % 2)
         t_paint_j[j] = 3.0 if p_j[j] == 1 else 0.0
 
-    # beta (last ops require big station)
     Iend = [O_j[j][-1] for j in J]
     beta_i = {i: (1 if i in Iend else 0) for i in I}
 
@@ -316,7 +543,6 @@ def make_base_data(overrides: dict | None = None):
         "M_proc": 1000.0, "M_seq": 1000.0, "M_Lseq": 1000.0
     }
 
-    # Apply overrides
     for key, val in overrides.items():
         if key not in data:
             raise ValueError(f"Unknown override key in scenario: {key}")
@@ -365,11 +591,9 @@ def add_urgent_job_from_payload(data, t0: float, urgent_payload: dict):
     if job_id in J:
         raise ValueError(f"urgent job_id already exists: {job_id}")
 
-    # release
     r_mode = uj.get("release_time_mode", "t0")
     r_u = float(t0) if r_mode == "t0" else float(uj["release_time_hours"])
 
-    # due
     d_mode = uj.get("due_time_mode", "t0_plus")
     if d_mode == "t0_plus":
         d_u = float(t0 + float(uj["due_time_hours"]))
@@ -530,7 +754,6 @@ def add_split_remainders_for_running_ops(data, I_run, t0, old_solution):
         Pred_i2[i_rem] = [i]
         beta_i2[i_rem] = 0
 
-        # propagate: if i was predecessor of k, add i_rem too
         for k in list(Pred_i2.keys()):
             k = int(k)
             if k == i_rem or k == i:
@@ -587,89 +810,88 @@ def build_model(name, data,
 
     model = Model(name)
 
-    x = model.addVars([(i, m) for i in I for m in M_i[i]], vtype=GRB.BINARY, name="x")
-    y = model.addVars([(i, l) for i in I for l in L_i[i]], vtype=GRB.BINARY, name="y")
+    x = model.addVars([(int(i), int(m)) for i in I for m in M_i[int(i)]], vtype=GRB.BINARY, name="x")
+    y = model.addVars([(int(i), int(l)) for i in I for l in L_i[int(i)]], vtype=GRB.BINARY, name="y")
 
-    zM_index = [(i, h, m) for i in I for h in I if i != h for m in M]
-    zM = model.addVars(zM_index, vtype=GRB.BINARY, name="zM")
-    zL_index = [(i, h, l) for i in I for h in I if i != h for l in L]
-    zL = model.addVars(zL_index, vtype=GRB.BINARY, name="zL")
+    # --------- IMPORTANT: build zM/zL only for (a<b) and common resources ----------
+    I_list = [int(v) for v in I]
+    nI = len(I_list)
 
-    S = model.addVars(I, lb=0.0, vtype=GRB.CONTINUOUS, name="S")
-    C = model.addVars(I, lb=0.0, vtype=GRB.CONTINUOUS, name="C")
+    zM_keys = []
+    zL_keys = []
+    for a in range(nI):
+        for b in range(a + 1, nI):
+            i = I_list[a]
+            h = I_list[b]
+            for m in set(M_i[i]).intersection(M_i[h]):
+                zM_keys.append((i, h, int(m)))
+            for l in set(L_i[i]).intersection(L_i[h]):
+                zL_keys.append((i, h, int(l)))
 
-    C_weld  = model.addVars(J, lb=0.0, vtype=GRB.CONTINUOUS, name="C_weld")
-    C_final = model.addVars(J, lb=0.0, vtype=GRB.CONTINUOUS, name="C_final")
+    zM = model.addVars(zM_keys, vtype=GRB.BINARY, name="zM")
+    zL = model.addVars(zL_keys, vtype=GRB.BINARY, name="zL")
 
-    T     = model.addVars(J, lb=0.0, vtype=GRB.CONTINUOUS, name="T")
+    S = model.addVars(I_list, lb=0.0, vtype=GRB.CONTINUOUS, name="S")
+    C = model.addVars(I_list, lb=0.0, vtype=GRB.CONTINUOUS, name="C")
+
+    C_weld  = model.addVars([int(j) for j in J], lb=0.0, vtype=GRB.CONTINUOUS, name="C_weld")
+    C_final = model.addVars([int(j) for j in J], lb=0.0, vtype=GRB.CONTINUOUS, name="C_final")
+
+    T     = model.addVars([int(j) for j in J], lb=0.0, vtype=GRB.CONTINUOUS, name="T")
     T_max = model.addVar(lb=0.0, vtype=GRB.CONTINUOUS, name="T_max")
     C_max = model.addVar(lb=0.0, vtype=GRB.CONTINUOUS, name="C_max")
 
     model.setObjective(T_max, GRB.MINIMIZE)
 
     running_set = set(int(i) for i in running_ops)
+    badM = set(int(m) for m in unavailable_machines)
+    badL = set(int(l) for l in unavailable_stations)
 
-    # keep must exist BEFORE assignment constraints (because assignment of remainder depends on keep)
+    # keep vars
     keep = None
-    if old_solution is not None and mode == "optimize" and running_ops:
+    if old_solution is not None and running_ops:
         if t0 is None:
-            raise ValueError("t0 must be set for mode=optimize")
-        keep = model.addVars(running_ops, vtype=GRB.BINARY, name="keep_running")
+            raise ValueError("t0 must be set when running_ops exist")
+        keep = model.addVars([int(i) for i in running_ops], vtype=GRB.BINARY, name="keep_running")
 
-    # ---------------------------
-    # Assignment constraints
-    # - Normal ops: must be assigned
-    # - Remainder ops: active only if keep[orig] == 0 in optimize mode
-    #                 inactive otherwise (prevents infeasibility when keep=1 and S=C for remainder)
-    # ---------------------------
-    for i in I:
-        i = int(i)
-
+    # Assignment constraints (remainder activation depends on keep, in BOTH modes)
+    for i in I_list:
         rhsM = 1
         rhsL = 1
 
         if i in remainder_ops:
-            if mode == "optimize" and keep is not None:
+            if keep is not None:
                 orig = rem_owner[i]
-                rhsM = 1 - keep[orig]  # keep=1 -> 0 (inactive), keep=0 -> 1 (active)
+                rhsM = 1 - keep[orig]
                 rhsL = 1 - keep[orig]
             else:
-                # continue mode: remainder is inactive placeholder
                 rhsM = 0
                 rhsL = 0
 
         model.addConstr(quicksum(x[i, m] for m in M_i[i]) == rhsM, name=f"assign_M_{i}")
         model.addConstr(quicksum(y[i, l] for l in L_i[i]) == rhsL, name=f"assign_L_{i}")
 
-    # availability: only reschedulable ops
     frozen_ops = set(int(i) for i in freeze_done_ops) | set(int(i) for i in running_ops)
     urgent_ops = set(int(i) for i in data.get("urgent_ops", []))
     free_ops_set = set(int(i) for i in free_ops)
     reschedulable_ops = (free_ops_set | urgent_ops | remainder_ops) - frozen_ops
 
     if unavailable_machines:
-        badM = set(int(m) for m in unavailable_machines)
-        for (ii, m) in x.keys():
+        for (ii, m) in list(x.keys()):
             if int(ii) in reschedulable_ops and int(m) in badM:
                 model.addConstr(x[ii, m] == 0, name=f"unavailM_{ii}_{m}")
 
     if unavailable_stations:
-        badL = set(int(l) for l in unavailable_stations)
-        for (ii, l) in y.keys():
+        for (ii, l) in list(y.keys()):
             if int(ii) in reschedulable_ops and int(l) in badL:
                 model.addConstr(y[ii, l] == 0, name=f"unavailL_{ii}_{l}")
 
-    # ------------------------------------------
-    # PROCESSING TIME LINKING (preemption logic)
-    # ------------------------------------------
-    if old_solution is not None and mode == "optimize" and running_ops:
+    # PROCESSING TIME LINKING (running ops)
+    if old_solution is not None and running_ops:
         S_old = old_solution["S_old"]
         C_old = old_solution["C_old"]
         x_old = old_solution["x_old"]
         y_old = old_solution["y_old"]
-
-        badM = set(int(m) for m in unavailable_machines)
-        badL = set(int(l) for l in unavailable_stations)
 
         def old_machine(i):
             for (ii, m), v in x_old.items():
@@ -683,15 +905,9 @@ def build_model(name, data,
                     return int(l)
             return None
 
-        # For running ops: x/y MUST stay old (historical execution happened there)
-        for i in running_ops:
-            i = int(i)
+        for i in [int(v) for v in running_ops]:
             m0 = old_machine(i)
             l0 = old_station(i)
-
-            # If old resource unavailable at t0 -> force preempt
-            if (m0 is not None and m0 in badM) or (l0 is not None and l0 in badL):
-                model.addConstr(keep[i] == 0, name=f"force_preempt_unavail_{i}")
 
             for m in M_i[i]:
                 if (i, m) in x:
@@ -700,8 +916,14 @@ def build_model(name, data,
                 if (i, l) in y:
                     model.addConstr(y[i, l] == int(y_old.get((i, l), 0)), name=f"fix_run_y_{i}_{l}")
 
-            # Fix start time
             model.addConstr(S[i] == float(S_old[i]), name=f"fix_run_S_{i}")
+
+            broken = ((m0 is not None and m0 in badM) or (l0 is not None and l0 in badL))
+            if broken:
+                model.addConstr(keep[i] == 0, name=f"force_preempt_unavail_{i}")
+            else:
+                if mode == "continue":
+                    model.addConstr(keep[i] == 1, name=f"force_keep_continue_{i}")
 
             if m0 is None:
                 m0 = M_i[i][0]
@@ -709,26 +931,22 @@ def build_model(name, data,
             full_p = float(p_im[(i, m0)])
             elapsed = max(0.01, float(t0 - float(S_old[i])))
 
-            # keep=1 -> finish exactly old completion, full duration
             model.addGenConstrIndicator(keep[i], True,  C[i] == float(C_old[i]), name=f"ind_keepC_{i}")
             model.addGenConstrIndicator(keep[i], True,  C[i] - S[i] == full_p,   name=f"ind_keepDur_{i}")
 
-            # keep=0 -> cut at t0, consume elapsed
             model.addGenConstrIndicator(keep[i], False, C[i] == float(t0),       name=f"ind_preemptC_{i}")
             model.addGenConstrIndicator(keep[i], False, C[i] - S[i] == elapsed,  name=f"ind_preemptDur_{i}")
 
-            # remainder constraints
             i_rem = rem_map.get(i, None)
-            if i_rem is not None and i_rem in I:
-                # if keep=1 -> remainder is inactive, and we pin it to old completion time
+            if i_rem is not None and int(i_rem) in I_list:
+                i_rem = int(i_rem)
                 model.addGenConstrIndicator(keep[i], True,  S[i_rem] == float(C_old[i]), name=f"ind_keepRemS_{i}")
                 model.addGenConstrIndicator(keep[i], True,  C[i_rem] == float(C_old[i]), name=f"ind_keepRemC_{i}")
-                # if keep=0 -> remainder must start after t0
                 model.addGenConstrIndicator(keep[i], False, S[i_rem] >= float(t0),       name=f"ind_preemptRemS_{i}")
 
     # Standard ptime constraints for NON-running ops
-    for i in I:
-        if int(i) in running_set and old_solution is not None and mode == "optimize":
+    for i in I_list:
+        if i in running_set and old_solution is not None:
             continue
         for m in M_i[i]:
             pijm = float(p_im[(i, m)])
@@ -736,125 +954,102 @@ def build_model(name, data,
             model.addConstr(C[i] - S[i] <= pijm + M_proc * (1 - x[i, m]), name=f"ptime_ub_{i}_{m}")
 
     # big station feasibility
-    for i in I:
+    for i in I_list:
         if beta_i.get(i, 0) == 1:
             for l in L_small:
-                if l in L_i[i]:
-                    model.addConstr(y[i, l] == 0, name=f"small_forbid_{i}_{l}")
+                if int(l) in set(int(v) for v in L_i[i]):
+                    if (i, int(l)) in y:
+                        model.addConstr(y[i, int(l)] == 0, name=f"small_forbid_{i}_{l}")
 
     # precedence
-    for i in I:
+    for i in I_list:
         for h in Pred_i.get(i, []):
-            model.addConstr(S[i] >= C[h], name=f"prec_{h}_{i}")
+            model.addConstr(S[i] >= C[int(h)], name=f"prec_{h}_{i}")
 
     # release (job first op)
-    for j in J:
-        first_op = O_j[j][0]
+    for j in [int(v) for v in J]:
+        first_op = int(O_j[j][0])
         model.addConstr(S[first_op] >= float(r_j[j]), name=f"release_{j}")
 
-    # machine sequencing
-    I_list = list(I)
-    nI = len(I_list)
-    for a in range(nI):
-        for b in range(a + 1, nI):
-            i = I_list[a]
-            h = I_list[b]
-            common_machines = set(M_i[i]).intersection(M_i[h])
-            for m in common_machines:
-                model.addConstr(
-                    S[h] >= C[i]
-                           - M_seq * (1 - zM[i, h, m])
-                           - M_seq * (1 - x[i, m])
-                           - M_seq * (1 - x[h, m]),
-                    name=f"no_overlapM_h_after_i_{i}{h}{m}"
-                )
-                model.addConstr(
-                    S[i] >= C[h]
-                           - M_seq * zM[i, h, m]
-                           - M_seq * (1 - x[i, m])
-                           - M_seq * (1 - x[h, m]),
-                    name=f"no_overlapM_i_after_h_{i}{h}{m}"
-                )
-                model.addConstr(zM[i, h, m] <= x[i, m])
-                model.addConstr(zM[i, h, m] <= x[h, m])
-                model.addConstr(zM[i, h, m] >= x[i, m] + x[h, m] - 1)
+    # -------------------------
+    # FIXED MACHINE SEQUENCING
+    # -------------------------
+    for (i, h, m) in zM.keys():
+        # zM=1 -> i before h
+        # zM=0 -> h before i
+        model.addConstr(
+            S[h] >= C[i]
+                   - M_seq * (1 - zM[i, h, m])
+                   - M_seq * (2 - x[i, m] - x[h, m]),
+            name=f"no_overlapM_h_after_i_{i}_{h}_{m}"
+        )
+        model.addConstr(
+            S[i] >= C[h]
+                   - M_seq * (zM[i, h, m])
+                   - M_seq * (2 - x[i, m] - x[h, m]),
+            name=f"no_overlapM_i_after_h_{i}_{h}_{m}"
+        )
 
-    # station sequencing (FIXED: removed duplicated zL term)
-    for a in range(nI):
-        for b in range(a + 1, nI):
-            i = I_list[a]
-            h = I_list[b]
-            common_stations = set(L_i[i]).intersection(L_i[h])
-            for l in common_stations:
-                model.addConstr(
-                    S[h] >= C[i]
-                           - M_Lseq * (1 - zL[i, h, l])
-                           - M_Lseq * (1 - y[i, l])
-                           - M_Lseq * (1 - y[h, l]),
-                    name=f"no_overlapL_h_after_i_{i}{h}{l}"
-                )
-                model.addConstr(
-                    S[i] >= C[h]
-                           - M_Lseq * zL[i, h, l]
-                           - M_Lseq * (1 - y[i, l])
-                           - M_Lseq * (1 - y[h, l]),
-                    name=f"no_overlapL_i_after_h_{i}{h}{l}"
-                )
-                model.addConstr(zL[i, h, l] <= y[i, l])
-                model.addConstr(zL[i, h, l] <= y[h, l])
-                model.addConstr(zL[i, h, l] >= y[i, l] + y[h, l] - 1)
+    # -------------------------
+    # FIXED STATION SEQUENCING
+    # -------------------------
+    for (i, h, l) in zL.keys():
+        model.addConstr(
+            S[h] >= C[i]
+                   - M_Lseq * (1 - zL[i, h, l])
+                   - M_Lseq * (2 - y[i, l] - y[h, l]),
+            name=f"no_overlapL_h_after_i_{i}_{h}_{l}"
+        )
+        model.addConstr(
+            S[i] >= C[h]
+                   - M_Lseq * (zL[i, h, l])
+                   - M_Lseq * (2 - y[i, l] - y[h, l]),
+            name=f"no_overlapL_i_after_h_{i}_{h}_{l}"
+        )
 
     # welding completion
-    for j in J:
+    for j in [int(v) for v in J]:
         for op in O_j[j]:
+            op = int(op)
             model.addConstr(C_weld[j] >= C[op], name=f"Cweld_ge_{j}_{op}")
 
     # final completion
-    for j in J:
+    for j in [int(v) for v in J]:
         model.addConstr(
             C_final[j] == C_weld[j] + g_j[j] * t_grind_j[j] + p_j[j] * t_paint_j[j],
             name=f"Cfinal_{j}"
         )
 
-    for j in J:
+    for j in [int(v) for v in J]:
         model.addConstr(T[j] >= C_final[j] - float(d_j[j]), name=f"Tdef_{j}")
         model.addConstr(C_max >= C_final[j], name=f"Cmax_ge_{j}")
         model.addConstr(T_max >= T[j], name=f"Tmax_ge_{j}")
 
     if t0 is not None and free_ops:
-        for i in free_ops:
-            if i in I:
+        for i in [int(v) for v in free_ops]:
+            if i in I_list:
                 model.addConstr(S[i] >= float(t0), name=f"free_after_t0_{i}")
 
-    # freeze done and running (continue mode)
-    if old_solution is not None and mode == "continue":
+    # freeze DONE ops only
+    if old_solution is not None:
         S_old = old_solution["S_old"]
         C_old = old_solution["C_old"]
         x_old = old_solution["x_old"]
         y_old = old_solution["y_old"]
 
-        for i in freeze_done_ops:
-            if i in I:
+        done_set = set(int(v) for v in freeze_done_ops)
+
+        for i in done_set:
+            if i in I_list:
                 model.addConstr(S[i] == float(S_old[i]), name=f"freeze_done_S_{i}")
                 model.addConstr(C[i] == float(C_old[i]), name=f"freeze_done_C_{i}")
 
-        for (i, m) in x.keys():
-            if int(i) in set(int(v) for v in freeze_done_ops):
+        for (i, m) in list(x.keys()):
+            if int(i) in done_set:
                 model.addConstr(x[i, m] == int(x_old.get((int(i), int(m)), 0)), name=f"freeze_done_x_{i}_{m}")
-        for (i, l) in y.keys():
-            if int(i) in set(int(v) for v in freeze_done_ops):
+        for (i, l) in list(y.keys()):
+            if int(i) in done_set:
                 model.addConstr(y[i, l] == int(y_old.get((int(i), int(l)), 0)), name=f"freeze_done_y_{i}_{l}")
-
-        for i in running_ops:
-            if i in I:
-                model.addConstr(S[i] == float(S_old[i]), name=f"freeze_run_S_{i}")
-                model.addConstr(C[i] == float(C_old[i]), name=f"freeze_run_C_{i}")
-        for (i, m) in x.keys():
-            if int(i) in set(int(v) for v in running_ops):
-                model.addConstr(x[i, m] == int(x_old.get((int(i), int(m)), 0)), name=f"freeze_run_x_{i}_{m}")
-        for (i, l) in y.keys():
-            if int(i) in set(int(v) for v in running_ops):
-                model.addConstr(y[i, l] == int(y_old.get((int(i), int(l)), 0)), name=f"freeze_run_y_{i}_{l}")
 
     model.update()
     return model, x, y, S, C, C_weld, C_final, T, T_max, C_max, keep
@@ -864,7 +1059,46 @@ def build_model(name, data,
 #  SOLVE WRAPPERS
 # ==========================================================
 
-def solve_baseline(data, plan_start_iso: str):
+def solve_baseline(data, plan_start_iso: str, method: str = "mip"):
+    """
+    method:
+      - "mip"       -> current Gurobi model
+      - "heuristic" -> ATCS list scheduling
+    """
+    method = (method or "mip").lower().strip()
+
+    if method == "heuristic":
+        sched, obj = heuristic_schedule(
+            data,
+            fixed_ops=None,
+            start_time_floor=0.0,
+            k1=2.0,
+            unavailable_machines=None,
+            unavailable_stations=None
+        )
+
+        S_old = {int(r["op_id"]): float(r["start"]) for r in sched}
+        C_old = {int(r["op_id"]): float(r["finish"]) for r in sched}
+
+        x_old = {}
+        y_old = {}
+        for r in sched:
+            i = int(r["op_id"])
+            m = r.get("machine", None)
+            l = r.get("station", None)
+            if m is not None:
+                x_old[_tuplekey_to_str(i, int(m))] = 1
+            if l is not None:
+                y_old[_tuplekey_to_str(i, int(l))] = 1
+
+        return {
+            "plan_start_iso": plan_start_iso,
+            "objective": {"T_max": float(obj["T_max"]), "C_max": float(obj["C_max"])},
+            "schedule": sched,
+            "S_old": S_old, "C_old": C_old,
+            "x_old": x_old, "y_old": y_old
+        }
+
     model, x, y, S, C, Cw, Cf, T, Tmax, Cmax, _ = build_model("Baseline", data)
     model.optimize()
     if model.SolCount == 0:
@@ -878,14 +1112,15 @@ def solve_baseline(data, plan_start_iso: str):
 
     schedule = []
     for i in I:
+        i = int(i)
         schedule.append({
-            "op_id": int(i),
-            "op_label": str(int(i)),
+            "op_id": i,
+            "op_label": str(i),
             "job_id": int(job_of.get(i, -1)),
             "start": float(S[i].X),
             "finish": float(C[i].X),
-            "machine": chosen_m[int(i)],
-            "station": chosen_l[int(i)],
+            "machine": chosen_m[i],
+            "station": chosen_l[i],
         })
 
     return {
@@ -897,14 +1132,29 @@ def solve_baseline(data, plan_start_iso: str):
     }
 
 
-def solve_reschedule(data_base,
-                    old_solution,
-                    urgent_payload: dict,
-                    unavailable_machines=None,
-                    unavailable_stations=None,
-                    mode="continue"):
+def solve_reschedule(
+    data_base,
+    old_solution,
+    urgent_payload: dict,
+    unavailable_machines=None,
+    unavailable_stations=None,
+    mode="continue",
+    method: str = "mip",
+):
+    """
+    method:
+      - "mip"       -> current Gurobi rescheduling model
+      - "heuristic" -> fixes done/running (baseline), schedules remainder by ATCS heuristic
+
+    IMPORTANT RULE:
+      - If there is a machine/station breakdown (unavailable_* not empty),
+        a running operation on that resource CANNOT "continue & finish" there.
+        => It must be cut at t0 and remainder must be assigned elsewhere.
+      - For urgent job / due date changes WITHOUT breakdown, model may keep or preempt.
+    """
     unavailable_machines = unavailable_machines or []
     unavailable_stations = unavailable_stations or []
+    method = (method or "mip").lower().strip()
 
     old_solution = normalize_old_solution(old_solution)
 
@@ -914,11 +1164,106 @@ def solve_reschedule(data_base,
     plan_calendar = old_solution.get("plan_calendar", {})
     t0 = compute_t0_from_plan_start(old_solution["plan_start_iso"], plan_calendar=plan_calendar)
 
-    I = data_base["I"]
-    I_done, I_run, I_free = classify_ops_by_t0(I, old_solution["S_old"], old_solution["C_old"], t0)
+    I0 = data_base["I"]
+    I_done, I_run, I_free = classify_ops_by_t0(I0, old_solution["S_old"], old_solution["C_old"], t0)
 
     data1 = add_urgent_job_from_payload(data_base, t0=t0, urgent_payload=urgent_payload)
     data2 = add_split_remainders_for_running_ops(data1, I_run, t0, old_solution)
+
+    if method == "heuristic":
+        job_of = op_to_job_map(data2["O_j"])
+
+        x_old = old_solution.get("x_old", {})
+        y_old = old_solution.get("y_old", {})
+
+        badM = set(int(m) for m in unavailable_machines)
+        badL = set(int(l) for l in unavailable_stations)
+
+        def old_machine(i):
+            for (ii, m), v in x_old.items():
+                if int(ii) == int(i) and int(v) == 1:
+                    return int(m)
+            return None
+
+        def old_station(i):
+            for (ii, l), v in y_old.items():
+                if int(ii) == int(i) and int(v) == 1:
+                    return int(l)
+            return None
+
+        fixed = {}
+
+        for i in I_done:
+            i = int(i)
+            fixed[i] = {
+                "op_id": i,
+                "op_label": str(i),
+                "job_id": int(job_of.get(i, -1)),
+                "start": float(old_solution["S_old"][i]),
+                "finish": float(old_solution["C_old"][i]),
+                "machine": old_machine(i),
+                "station": old_station(i),
+            }
+
+        for i in I_run:
+            i = int(i)
+            m0 = old_machine(i)
+            l0 = old_station(i)
+
+            start_i = float(old_solution["S_old"][i])
+            finish_i = float(old_solution["C_old"][i])
+
+            if (m0 is not None and m0 in badM) or (l0 is not None and l0 in badL):
+                finish_i = float(t0)
+
+            fixed[i] = {
+                "op_id": i,
+                "op_label": str(i),
+                "job_id": int(job_of.get(i, -1)),
+                "start": float(start_i),
+                "finish": float(finish_i),
+                "machine": m0,
+                "station": l0,
+            }
+
+        sched, obj = heuristic_schedule(
+            data2,
+            fixed_ops=fixed,
+            start_time_floor=float(t0),
+            k1=2.0,
+            unavailable_machines=unavailable_machines,
+            unavailable_stations=unavailable_stations,
+        )
+
+        urgent = int(data2.get("urgent_job_id"))
+        urgent_ops = data2.get("urgent_ops", [])
+
+        C_by_op = {int(r["op_id"]): float(r["finish"]) for r in sched}
+        Cw_u = 0.0
+        for op in data2["O_j"][urgent]:
+            Cw_u = max(Cw_u, C_by_op[int(op)])
+        Cf_u = (
+            Cw_u
+            + data2["g_j"][urgent] * data2["t_grind_j"][urgent]
+            + data2["p_j"][urgent] * data2["t_paint_j"][urgent]
+        )
+        T_u = max(0.0, Cf_u - float(data2["d_j"][urgent]))
+
+        return {
+            "t0": float(t0),
+            "sets": {"I_done": I_done, "I_run": I_run, "I_free": I_free},
+            "objective": {"T_max": float(obj["T_max"]), "C_max": float(obj["C_max"])},
+            "urgent": {
+                "job_id": urgent,
+                "ops": [int(i) for i in urgent_ops],
+                "C_final": float(Cf_u),
+                "T": float(T_u),
+                "d": float(data2["d_j"][urgent])
+            },
+            "keep_decisions": {},
+            "schedule": sched,
+            "changed_ops": []
+        }
 
     model, x, y, S, C, Cw, Cf, T, Tmax, Cmax, keep = build_model(
         name="Reschedule",
@@ -950,7 +1295,6 @@ def solve_reschedule(data_base,
     job_of = op_to_job_map(data2["O_j"])
     chosen_m, chosen_l = extract_assignment_for_ops(data2["I"], data2["M_i"], data2["L_i"], x, y)
 
-    # op_label mapping for remainders
     rem_map = data2.get("rem_map", {})
     rem_to_orig = {int(v): int(k) for k, v in rem_map.items()}
 
@@ -977,8 +1321,8 @@ def solve_reschedule(data_base,
         if old_s is None:
             continue
 
-        new_s = float(S[i].X) if i in S else None
-        new_c = float(C[i].X) if i in C else None
+        new_s = float(S[int(i)].X) if int(i) in S else None
+        new_c = float(C[int(i)].X) if int(i) in C else None
         if new_s is None or new_c is None:
             continue
 

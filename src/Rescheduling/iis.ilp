@@ -1,12 +1,94 @@
-\ Model Reschedule_DisruptionOnly_copy
+\ Model Reschedule_DisruptionOnly_continue_copy
 \ LP format - for model browsing. Use MPS format to capture full model detail.
-\ Signature: 0xf1dc94bea0527fed
+\ Signature: 0x1ef94a9fee4137f9
 Minimize
  
 Subject To
- assign_M_3: x[3,1] = 1
- unavailM_3_1: x[3,1] = 0
+ assign_M_11: x[11,1] + x[11,2] = 1
+ assign_M_13: x[13,1] + x[13,2] = 1
+ assign_M_15: x[15,1] + x[15,2] = 1
+ assign_M_17: x[17,1] + x[17,2] = 1
+ assign_M_19: x[19,1] + x[19,2] = 1
+ assign_M_21: x[21,1] + x[21,2] = 1
+ assign_M_23: x[23,1] + x[23,2] = 1
+ assign_M_25: x[25,1] + x[25,2] = 1
+ assign_M_27: x[27,1] + x[27,2] = 1
+ assign_M_29: x[29,1] + x[29,2] = 1
+ assign_M_32: x[32,1] + x[32,2] + keep_running[9] = 1
+ unavailM_11_1: x[11,1] = 0
+ unavailM_13_1: x[13,1] = 0
+ unavailM_15_1: x[15,1] = 0
+ unavailM_17_1: x[17,1] = 0
+ unavailM_19_1: x[19,1] = 0
+ unavailM_21_1: x[21,1] = 0
+ unavailM_23_1: x[23,1] = 0
+ unavailM_25_1: x[25,1] = 0
+ unavailM_27_1: x[27,1] = 0
+ unavailM_29_1: x[29,1] = 0
+ unavailM_32_1: x[32,1] = 0
+ force_preempt_unavail_9: keep_running[9] = 0
+ ptime_lb_11_2: - 1000 x[11,2] - S[11] + C[11] >= -995.5
+ ptime_lb_13_2: - 1000 x[13,2] - S[13] + C[13] >= -993.5
+ ptime_lb_15_2: - 1000 x[15,2] - S[15] + C[15] >= -996.5
+ ptime_lb_17_2: - 1000 x[17,2] - S[17] + C[17] >= -994.5
+ ptime_lb_19_2: - 1000 x[19,2] - S[19] + C[19] >= -992.5
+ ptime_lb_21_2: - 1000 x[21,2] - S[21] + C[21] >= -995.5
+ ptime_lb_23_2: - 1000 x[23,2] - S[23] + C[23] >= -993.5
+ ptime_lb_25_2: - 1000 x[25,2] - S[25] + C[25] >= -996.5
+ ptime_lb_27_2: - 1000 x[27,2] - S[27] + C[27] >= -994.5
+ ptime_lb_29_2: - 1000 x[29,2] - S[29] + C[29] >= -992.5
+ ptime_lb_32_2: - 1000 x[32,2] - S[32] + C[32] >= -996.0000000019357
+ prec_32_11: S[11] - C[32] >= 0
+ prec_15_17: S[17] - C[15] >= 0
+ prec_19_21: S[21] - C[19] >= 0
+ prec_23_25: S[25] - C[23] >= 0
+ no_overlapM_h_after_i_11132: - 1000 x[11,2] - 1000 x[13,2]
+   - 1000 zM[11,13,2] + S[13] - C[11] >= -3000
+ R4819: - x[11,2] - x[13,2] + zM[11,13,2] >= -1
+ no_overlapM_h_after_i_13152: - 1000 x[13,2] - 1000 x[15,2]
+   - 1000 zM[13,15,2] + S[15] - C[13] >= -3000
+ R5479: - x[13,2] - x[15,2] + zM[13,15,2] >= -1
+ no_overlapM_h_after_i_17192: - 1000 x[17,2] - 1000 x[19,2]
+   - 1000 zM[17,19,2] + S[19] - C[17] >= -3000
+ R6619: - x[17,2] - x[19,2] + zM[17,19,2] >= -1
+ no_overlapM_h_after_i_21232: - 1000 x[21,2] - 1000 x[23,2]
+   - 1000 zM[21,23,2] + S[23] - C[21] >= -3000
+ R7519: - x[21,2] - x[23,2] + zM[21,23,2] >= -1
+ no_overlapM_h_after_i_25272: - 1000 x[25,2] - 1000 x[27,2]
+   - 1000 zM[25,27,2] + S[27] - C[25] >= -3000
+ R8179: - x[25,2] - x[27,2] + zM[25,27,2] >= -1
+ no_overlapM_h_after_i_27292: - 1000 x[27,2] - 1000 x[29,2]
+   - 1000 zM[27,29,2] + S[29] - C[27] >= -3000
+ R8419: - x[27,2] - x[29,2] + zM[27,29,2] >= -1
+ no_overlapM_h_after_i_29322: - 1000 x[29,2] - 1000 x[32,2]
+   - 1000 zM[29,32,2] + S[32] - C[29] >= -3000
+ R8609: - x[29,2] - x[32,2] + zM[29,32,2] >= -1
 Bounds
+ S[11] free
+ S[13] free
+ S[15] free
+ S[17] free
+ S[19] free
+ S[21] free
+ S[23] free
+ S[25] free
+ S[27] free
+ S[29] free
+ S[32] free
+ C[11] free
+ C[13] free
+ C[15] free
+ C[17] free
+ C[19] free
+ C[21] free
+ C[23] free
+ C[25] free
+ C[27] free
+ C[29] free
+ C[32] free
 Binaries
- x[3,1]
+ x[11,1] x[11,2] x[13,1] x[13,2] x[15,1] x[15,2] x[17,1] x[17,2] x[19,1]
+ x[19,2] x[21,1] x[21,2] x[23,1] x[23,2] x[25,1] x[25,2] x[27,1] x[27,2]
+ x[29,1] x[29,2] x[32,1] x[32,2] zM[11,13,2] zM[13,15,2] zM[17,19,2]
+ zM[21,23,2] zM[25,27,2] zM[27,29,2] zM[29,32,2] keep_running[9]
 End

@@ -8,10 +8,8 @@ import shutil
 import subprocess
 from datetime import datetime, timezone
 
-# baseline/reschedule entry points (existing)
 from solver_core import make_base_data, solve_baseline, solve_reschedule
 
-# import helper pieces to run "disruption-only" reschedule WITHOUT adding urgent job
 from solver_core import (
     normalize_old_solution,
     compute_t0_from_plan_start,
@@ -71,7 +69,6 @@ def _load_urgent_payload_from_path(path: str) -> dict:
             raise FileNotFoundError(f"urgent_payload_path not found: {path}")
 
     uj = _load_json(path)
-    # allow file to be either {"urgent_job": {...}} OR directly {...}
     if isinstance(uj, dict) and "urgent_job" in uj:
         return uj
     if isinstance(uj, dict) and "job_id" in uj:
@@ -85,7 +82,7 @@ def _pick_urgent_payload(scn: dict) -> dict:
     - "urgent_job": {...}
     - "urgent_payload": {...}
     - "urgent_payload_path": "scenarios/urgent_x.json"
-    - legacy nested: "reschedule": {"urgent_payload_path": "..."}
+    - nested: "reschedule": {"urgent_payload_path": "..."}
     """
     if "urgent_job" in scn and isinstance(scn["urgent_job"], dict):
         return {"urgent_job": scn["urgent_job"]}
@@ -118,12 +115,6 @@ def _validate_urgent_payload_if_present(urgent_payload: dict, scenario_path: str
 
 
 def _pick_disruptions(scn: dict):
-    """
-    Supports:
-    - "disruptions": {...}
-    - legacy nested: "reschedule": {"unavailable_machines": [...], "unavailable_stations": [...]}
-    - flat keys
-    """
     if "disruptions" in scn and isinstance(scn["disruptions"], dict):
         d = scn["disruptions"]
         return d.get("unavailable_machines", []), d.get("unavailable_stations", [])
@@ -182,6 +173,36 @@ def _run_plotter_and_archive(tag: str, workdir: str):
             print(f"✅ Saved: {dst}")
 
 
+def _apply_overrides_to_data(data: dict, overrides: dict) -> dict:
+    """
+    Applies overrides in the SAME style as make_base_data(overrides=...),
+    but WITHOUT rebuilding the whole dataset.
+    This is critical so baseline stays fixed, and only reschedule sees overrides.
+    """
+    if not overrides:
+        return data
+
+    out = dict(data)
+
+    for key, val in overrides.items():
+        if key not in out:
+            raise ValueError(f"Unknown override key in scenario: {key}")
+
+        if isinstance(out[key], dict) and isinstance(val, dict):
+            new_map = dict(out[key])
+            for kk, vv in val.items():
+                try:
+                    ik = int(kk)
+                except Exception:
+                    ik = kk
+                new_map[ik] = vv
+            out[key] = new_map
+        else:
+            out[key] = val
+
+    return out
+
+
 def solve_reschedule_disruption_only(
     data_base: dict,
     old_solution: dict,
@@ -189,15 +210,6 @@ def solve_reschedule_disruption_only(
     unavailable_stations=None,
     mode="optimize",
 ):
-    """
-    Reschedule WITHOUT adding urgent job.
-    Purpose: scenarios like 2,3,6 where only disruptions exist.
-
-    - Computes t0 from plan_start_iso + plan_calendar
-    - Classifies ops at t0: done / running / free
-    - Adds remainder ops for running ones (cont)
-    - Builds and solves the same model via build_model(...)
-    """
     unavailable_machines = unavailable_machines or []
     unavailable_stations = unavailable_stations or []
 
@@ -206,28 +218,37 @@ def solve_reschedule_disruption_only(
     if "plan_start_iso" not in old_solution:
         raise ValueError("baseline_solution.json is missing plan_start_iso. Re-run baseline.")
 
-    plan_calendar = old_solution.get("plan_calendar", {})
+    plan_calendar = old_solution.get("plan_calendar") or {"utc_offset": "+03:00"}
     t0 = compute_t0_from_plan_start(old_solution["plan_start_iso"], plan_calendar=plan_calendar)
 
     I = data_base["I"]
     I_done, I_run, I_free = classify_ops_by_t0(I, old_solution["S_old"], old_solution["C_old"], t0)
 
-    # Only split running ops (so remainder can be reassigned if resource is broken)
     data2 = add_split_remainders_for_running_ops(data_base, I_run, t0, old_solution)
 
-    model, x, y, S, C, Cw, Cf, T, Tmax, Cmax, keep = build_model(
-        name="Reschedule_DisruptionOnly",
-        data=data2,
-        unavailable_machines=unavailable_machines,
-        unavailable_stations=unavailable_stations,
-        freeze_done_ops=I_done,
-        running_ops=I_run,
-        mode=mode,
-        t0=t0,
-        free_ops=I_free,
-        old_solution=old_solution
-    )
-    model.optimize()
+    def _try_solve(chosen_mode: str):
+        model, x, y, S, C, Cw, Cf, T, Tmax, Cmax, keep = build_model(
+            name=f"Reschedule_DisruptionOnly_{chosen_mode}",
+            data=data2,
+            unavailable_machines=unavailable_machines,
+            unavailable_stations=unavailable_stations,
+            freeze_done_ops=I_done,
+            running_ops=I_run,
+            mode=chosen_mode,
+            t0=t0,
+            free_ops=I_free,
+            old_solution=old_solution
+        )
+        model.optimize()
+        return model, x, y, S, C, Tmax, Cmax, keep
+
+    # 1) try requested mode
+    model, x, y, S, C, Tmax, Cmax, keep = _try_solve(mode)
+
+    # 2) fallback: optimize infeasible -> continue
+    if model.SolCount == 0 and mode == "optimize":
+        print("⚠️ Disruption-only optimize infeasible, falling back to mode=continue...")
+        model, x, y, S, C, Tmax, Cmax, keep = _try_solve("continue")
 
     if model.SolCount == 0:
         model.computeIIS()
@@ -303,14 +324,20 @@ def main():
     plan_start_iso = scn.get("plan_start_iso", "2025-12-18T05:00:00+00:00")
     plan_calendar = scn.get("plan_calendar", {"utc_offset": "+03:00"})
 
-    overrides = scn.get("overrides", {})
-    data = make_base_data(overrides=overrides)
+    # ✅ IMPORTANT FIX:
+    # Baseline uses baseline_overrides (default empty),
+    # Reschedule uses overrides (default empty).
+    baseline_overrides = scn.get("baseline_overrides", {}) or {}
+    reschedule_overrides = scn.get("overrides", {}) or {}
+
+    # --- BASELINE DATA (fixed) ---
+    data_baseline = make_base_data(overrides=baseline_overrides)
 
     tag = _scenario_tag(scn, scenario_path)
     baseline_out, reschedule_out, canonical_base, canonical_res = _pick_outputs(scn, workdir)
 
     # --- BASELINE ---
-    baseline = solve_baseline(data, plan_start_iso=plan_start_iso)
+    baseline = solve_baseline(data_baseline, plan_start_iso=plan_start_iso)
     baseline["plan_calendar"] = plan_calendar
     baseline["scenario_name"] = scenario_name
 
@@ -322,6 +349,9 @@ def main():
     print("plan_start_iso (UTC):", baseline["plan_start_iso"])
     print("objective:", baseline["objective"])
 
+    # --- RESCHEDULE DATA (baseline + overrides that kick in after t0) ---
+    data_reschedule = _apply_overrides_to_data(data_baseline, reschedule_overrides)
+
     # --- RESCHEDULE ---
     urgent_payload = _pick_urgent_payload(scn)
     _validate_urgent_payload_if_present(urgent_payload, scenario_path)
@@ -330,9 +360,8 @@ def main():
     mode = _pick_mode(scn)
 
     if urgent_payload:
-        # normal urgent reschedule
         res = solve_reschedule(
-            data_base=data,
+            data_base=data_reschedule,
             old_solution=baseline,
             urgent_payload=urgent_payload,
             unavailable_machines=unavailable_machines,
@@ -341,9 +370,8 @@ def main():
         )
         res["note"] = "Urgent-job reschedule."
     else:
-        # disruption-only reschedule (NO urgent added)
         res = solve_reschedule_disruption_only(
-            data_base=data,
+            data_base=data_reschedule,
             old_solution=baseline,
             unavailable_machines=unavailable_machines,
             unavailable_stations=unavailable_stations,
@@ -356,6 +384,7 @@ def main():
         "unavailable_machines": unavailable_machines,
         "unavailable_stations": unavailable_stations
     }
+    res["applied_overrides_at_reschedule"] = reschedule_overrides
 
     _save_json(reschedule_out, res)
     _save_json(canonical_res, res)
