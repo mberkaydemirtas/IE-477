@@ -1,25 +1,31 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Created on Mon Dec 22 17:27:33 2025
+Created on Mon Dec 22 17:38:57 2025
 
 @author: ezgieker
 """
 
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
+"""
+Heuristic GT+ATCS scheduling with Gurobi-like plots:
+- Due/Release scatter
+- Machine-wise Gantt
+- Station-wise Gantt
+(legend outside on the right, same layout feel as your Gurobi script)
+"""
 
 import math
 import matplotlib.pyplot as plt
 from matplotlib.patches import Patch
 
 # ===============================
-#  FIGURE SIZES (match your screenshots)
+#  FIGURE SETTINGS (Gurobi-like)
 # ===============================
-FIGSIZE_MACHINE = (7.0, 3.0)   # small machine chart
-FIGSIZE_STATION = (14.0, 6.0)  # big station chart
-FIGSIZE_DUE     = (4.8, 3.0)   # release/due scatter like your example
-FIG_DPI = 120
+FIGSIZE_GANTT = (10, 6)      # same feel as gurobi plots
+FIGSIZE_DUE   = (6.4, 4.8)   # close to matplotlib default-like
+FIG_DPI = 100               # gurobi script didn't set dpi -> default-ish
 
 # ===============================
 #  DATA – SCENARIO: One Very Urgent Job (Job 1, 10 operations)
@@ -52,7 +58,8 @@ O_j = {
 M = [1, 2, 3, 4]
 
 # 2 machine types
-K = [1, 2]  # 1=TIG, 2=MAG
+# 1 = TIG, 2 = MAG
+K = [1, 2]
 
 machine_type = {
     1: 1,  # TIG
@@ -80,6 +87,7 @@ M_i = {i: [m for m in M if machine_type[m] in K_i[i]] for i in I}
 L = [1, 2, 3, 4]
 L_i = {i: [1, 2, 3, 4] for i in I}
 
+# Big and small stations
 L_big   = [1, 2, 3]
 L_small = [4]
 
@@ -119,15 +127,13 @@ for i in I:
 # ===============================
 #  RELEASE TIMES – all 0
 # ===============================
-
 r_j = {j: 0.0 for j in J}
 
 # ===============================
 #  DUE DATES – Job 1 extremely urgent
 # ===============================
-
 d_j = {
-    1: 25.0,   # VERY tight
+    1: 25.0,   # VERY tight (bariz tardy yapmak için)
     2: 80.0,
     3: 90.0,
     4: 85.0,
@@ -140,7 +146,6 @@ d_j = {
 # ===============================
 #  Grinding / Painting
 # ===============================
-
 g_j = {1: 1, 2: 0, 3: 1, 4: 0, 5: 1, 6: 0, 7: 1, 8: 0}
 p_j = {1: 1, 2: 1, 3: 1, 4: 0, 5: 0, 6: 0, 7: 0, 8: 0}
 
@@ -155,35 +160,26 @@ for j in J:
 #  BIG-STATION REQUIREMENT
 #  (only end operations require big station in this scenario)
 # ===============================
-
 Iend = [O_j[j][-1] for j in J]
 beta_i = {i: (1 if i in Iend else 0) for i in I}
 
 # ===============================
-#  JOB COLORS (same palette as your example)
+#  JOB COLORS (match Gurobi script: tab10 colormap)
 # ===============================
-
-JOB_COLORS = {
-    1: "tab:blue",
-    2: "tab:orange",
-    3: "tab:green",
-    4: "tab:red",
-    5: "tab:purple",
-    6: "tab:brown",
-    7: "tab:pink",
-    8: "tab:gray",
-}
+_cmap = plt.cm.get_cmap("tab10")
+JOB_COLORS = {j: _cmap((j - 1) % 10) for j in J}
 
 # ===============================
 #  HELPERS
 # ===============================
 
-def get_job_of_map(J, O_j):
+def get_job_of_map(J_, O_j_):
     job_of = {}
-    for j in J:
-        for i in O_j[j]:
-            job_of[i] = j
+    for jj in J_:
+        for op in O_j_[jj]:
+            job_of[op] = jj
     return job_of
+
 
 def verify_data():
     print("\n=== DATA VERIFICATION ===")
@@ -225,93 +221,120 @@ def verify_data():
                 raise ValueError(f"Op {i} requires BIG station but has no BIG station feasible!")
     print("OK: big-station feasibility consistent.")
 
+
 # ===============================
-#  DUE DATE / RELEASE PLOT (your example)
+#  DUE/RELEASE PLOT (Gurobi-like)
 # ===============================
 
-def plot_release_due_dates(J, r_j, d_j, title="Release and due dates per job",
-                           figsize=FIGSIZE_DUE, dpi=FIG_DPI):
-    plt.figure(figsize=figsize, dpi=dpi)
-    jobs = list(J)
-    releases = [r_j[j] for j in jobs]
-    dues = [d_j[j] for j in jobs]
+def plot_release_due_dates_like_gurobi(J_, r_j_, d_j_):
+    job_ids = list(J_)
+    releases = [r_j_[j] for j in job_ids]
+    dues     = [d_j_[j] for j in job_ids]
 
-    plt.scatter(releases, jobs, marker="o", label="release")
-    plt.scatter(dues, jobs, marker="x", label="due")
+    plt.figure(figsize=FIGSIZE_DUE, dpi=FIG_DPI)
+    plt.scatter(releases, job_ids, marker="o", label="release")
+    plt.scatter(dues,     job_ids, marker="x", label="due")
     plt.xlabel("Time")
     plt.ylabel("Job")
-    plt.title(title)
+    plt.title("Release and due dates per job")
+    plt.yticks(job_ids)
     plt.legend()
     plt.tight_layout()
 
+
 # ===============================
-#  COLORED GANTT PLOTS + LEGEND
+#  GANTT PLOTS (Gurobi-like layout)
 # ===============================
 
-def _legend_job_key():
-    return [Patch(facecolor=JOB_COLORS[j], edgecolor="black", label=f"Job {j}") for j in sorted(JOB_COLORS)]
+def plot_gantt_by_machine_like_gurobi(I_, M_, S_, C_, assign_machine_,
+                                      title="Machine-wise welding schedule"):
+    fig, ax = plt.subplots(figsize=FIGSIZE_GANTT, dpi=FIG_DPI)
 
-def plot_gantt_by_machine_colored(I, M, S, C, assign_machine, job_of,
-                                  title="Machine-wise welding schedule",
-                                  figsize=FIGSIZE_MACHINE, dpi=FIG_DPI):
-    plt.figure(figsize=figsize, dpi=dpi)
-    y_ticks, y_labels = [], []
+    y_ticks = []
+    y_labels = []
 
-    for idx_m, m in enumerate(M):
-        y_ticks.append(idx_m)
+    op_to_job = {}
+    for j in J:
+        for op in O_j[j]:
+            op_to_job[op] = j
+
+    for idx_m, m in enumerate(M_):
+        y_pos = idx_m
+        y_ticks.append(y_pos)
+
         mtype = "TIG" if machine_type[m] == 1 else "MAG"
         y_labels.append(f"Machine {m} ({mtype})")
 
-        ops = [i for i in I if assign_machine.get(i, None) == m]
-        ops.sort(key=lambda i: S[i])
+        ops = [i for i in I_ if assign_machine_.get(i, None) == m]
+        ops.sort(key=lambda i: S_[i])
 
         for i in ops:
-            j = job_of[i]
-            color = JOB_COLORS.get(j, "gray")
-            plt.barh(idx_m, C[i] - S[i], left=S[i],
-                     color=color, edgecolor="black", linewidth=0.4)
-            plt.text(S[i], idx_m, str(i), va="center", fontsize=7, color="black")
+            start = S_[i]
+            finish = C_[i]
+            width = finish - start
 
-    plt.yticks(y_ticks, y_labels, fontsize=8)
-    plt.xlabel("Time", fontsize=9)
-    plt.title(title, fontsize=10)
-    plt.tight_layout()
-    plt.legend(handles=_legend_job_key(), title="Job Color Key",
-               bbox_to_anchor=(1.02, 1), loc="upper left",
-               fontsize=8, title_fontsize=9)
+            job_of_i = op_to_job.get(i, None)
+            color = JOB_COLORS.get(job_of_i, "gray")
 
-def plot_gantt_by_station_colored(I, L, S, C, assign_station, job_of,
-                                  L_big=None,
-                                  title="Station-wise welding schedule",
-                                  figsize=FIGSIZE_STATION, dpi=FIG_DPI):
-    if L_big is None:
-        L_big = []
+            ax.barh(y_pos, width, left=start, color=color)
+            ax.text(start + width / 2, y_pos, f"{i}",
+                    va="center", ha="center", fontsize=7)
 
-    plt.figure(figsize=figsize, dpi=dpi)
-    y_ticks, y_labels = [], []
+    ax.set_yticks(y_ticks)
+    ax.set_yticklabels(y_labels)
+    ax.set_xlabel("Time")
+    ax.set_title(title)
 
-    for idx_l, l in enumerate(L):
-        y_ticks.append(idx_l)
-        y_labels.append(f"Station {l} (big station)" if l in L_big else f"Station {l}")
+    handles = [Patch(facecolor=JOB_COLORS[j], label=f"Job {j}") for j in J]
+    ax.legend(handles=handles, title="Jobs",
+              loc="upper right", bbox_to_anchor=(1.25, 1.0))
 
-        ops = [i for i in I if assign_station.get(i, None) == l]
-        ops.sort(key=lambda i: S[i])
+    fig.tight_layout(rect=[0, 0, 0.8, 1])  # leave space for legend
+
+
+def plot_gantt_by_station_like_gurobi(I_, L_, S_, C_, assign_station_,
+                                      title="Station-wise welding schedule"):
+    fig, ax = plt.subplots(figsize=FIGSIZE_GANTT, dpi=FIG_DPI)
+
+    y_ticks = []
+    y_labels = []
+
+    op_to_job = {}
+    for j in J:
+        for op in O_j[j]:
+            op_to_job[op] = j
+
+    for idx_l, l in enumerate(L_):
+        y_pos = idx_l
+        y_ticks.append(y_pos)
+        y_labels.append(f"Station {l}")
+
+        ops = [i for i in I_ if assign_station_.get(i, None) == l]
+        ops.sort(key=lambda i: S_[i])
 
         for i in ops:
-            j = job_of[i]
-            color = JOB_COLORS.get(j, "gray")
-            plt.barh(idx_l, C[i] - S[i], left=S[i],
-                     color=color, edgecolor="black", linewidth=0.4)
-            plt.text(S[i], idx_l, str(i), va="center", fontsize=9, color="black")
+            start = S_[i]
+            finish = C_[i]
+            width = finish - start
 
-    plt.yticks(y_ticks, y_labels, fontsize=10)
-    plt.xlabel("Time", fontsize=11)
-    plt.title(title, fontsize=12)
-    plt.grid(axis="x", linestyle="--", linewidth=0.5, alpha=0.4)
-    plt.tight_layout()
-    plt.legend(handles=_legend_job_key(), title="Job Color Key",
-               bbox_to_anchor=(1.02, 1), loc="upper left",
-               fontsize=10, title_fontsize=11)
+            job_of_i = op_to_job.get(i, None)
+            color = JOB_COLORS.get(job_of_i, "gray")
+
+            ax.barh(y_pos, width, left=start, color=color)
+            ax.text(start + width / 2, y_pos, f"{i}",
+                    va="center", ha="center", fontsize=7)
+
+    ax.set_yticks(y_ticks)
+    ax.set_yticklabels(y_labels)
+    ax.set_xlabel("Time")
+    ax.set_title(title)
+
+    handles = [Patch(facecolor=JOB_COLORS[j], label=f"Job {j}") for j in J]
+    ax.legend(handles=handles, title="Jobs",
+              loc="upper right", bbox_to_anchor=(1.25, 1.0))
+
+    fig.tight_layout(rect=[0, 0, 0.8, 1])
+
 
 # ===============================
 #  HEURISTIC: GT + ATCS
@@ -347,7 +370,7 @@ def heuristic_GT_ATCS(k1=2.0):
 
     def feasible_stations(i):
         if beta_i[i] == 1:
-            return [l for l in L_i[i] if l not in L_small]  # only BIG
+            return [l for l in L_i[i] if l not in L_small]  # only BIG stations
         return list(L_i[i])
 
     while len(scheduled) < len(I):
@@ -421,6 +444,7 @@ def heuristic_GT_ATCS(k1=2.0):
 
     return S, C, assign_machine, assign_station, C_weld, C_final, T, max(T.values()), max(C_final.values())
 
+
 def check_solution(S, C, assign_machine, assign_station, tol=1e-6):
     job_of = get_job_of_map(J, O_j)
 
@@ -428,15 +452,19 @@ def check_solution(S, C, assign_machine, assign_station, tol=1e-6):
     for i in I:
         for h in Pred_i[i]:
             if S[i] + tol < C[h]:
-                raise AssertionError(f"Precedence violated: {h}->{i} (S[{i}]={S[i]:.2f} < C[{h}]={C[h]:.2f})")
+                raise AssertionError(
+                    f"Precedence violated: {h}->{i} (S[{i}]={S[i]:.2f} < C[{h}]={C[h]:.2f})"
+                )
 
     # release
     for i in I:
         j = job_of[i]
         if S[i] + tol < r_j[j]:
-            raise AssertionError(f"Release violated: op {i} starts {S[i]:.2f} < r_j[{j}]={r_j[j]:.2f}")
+            raise AssertionError(
+                f"Release violated: op {i} starts {S[i]:.2f} < r_j[{j}]={r_j[j]:.2f}"
+            )
 
-    # big station
+    # big station requirement
     for i in I:
         if beta_i[i] == 1 and assign_station[i] in L_small:
             raise AssertionError(f"Big-station violated: op {i} on station {assign_station[i]}")
@@ -459,6 +487,7 @@ def check_solution(S, C, assign_machine, assign_station, tol=1e-6):
 
     print("All checks passed.")
 
+
 # ===============================
 #  MAIN
 # ===============================
@@ -466,10 +495,10 @@ def check_solution(S, C, assign_machine, assign_station, tol=1e-6):
 if __name__ == "__main__":
     verify_data()
 
-    # NEW: due/release scatter plot (your example figure)
-    plot_release_due_dates(J, r_j, d_j, title="Release and due dates per job",
-                           figsize=FIGSIZE_DUE, dpi=FIG_DPI)
+    # Gurobi-like due/release plot
+    plot_release_due_dates_like_gurobi(J, r_j, d_j)
 
+    # Solve heuristic
     S, C, am, al, Cw, Cf, T, T_max, C_max = heuristic_GT_ATCS(k1=2.0)
 
     print("\n===== Objective (Heuristic GT+ATCS) =====")
@@ -478,23 +507,15 @@ if __name__ == "__main__":
 
     print("\n===== Jobs =====")
     for j in J:
-        print(f"Job {j}: C_weld={Cw[j]:.2f}, C_final={Cf[j]:.2f}, "
-              f"T_j={T[j]:.2f}, d_j={d_j[j]:.2f}")
+        print(
+            f"Job {j}: C_weld={Cw[j]:.2f}, C_final={Cf[j]:.2f}, "
+            f"T_j={T[j]:.2f}, d_j={d_j[j]:.2f}"
+        )
 
     check_solution(S, C, am, al)
 
-    job_of = get_job_of_map(J, O_j)
-
-    plot_gantt_by_machine_colored(
-        I, M, S, C, am, job_of,
-        title="Machine-wise welding schedule",
-        figsize=FIGSIZE_MACHINE, dpi=FIG_DPI
-    )
-    plot_gantt_by_station_colored(
-        I, L, S, C, al, job_of,
-        L_big=L_big,
-        title="Station-wise welding schedule",
-        figsize=FIGSIZE_STATION, dpi=FIG_DPI
-    )
+    # Gurobi-like gantts
+    plot_gantt_by_machine_like_gurobi(I, M, S, C, am, title="Machine-wise welding schedule")
+    plot_gantt_by_station_like_gurobi(I, L, S, C, al, title="Station-wise welding schedule")
 
     plt.show()
