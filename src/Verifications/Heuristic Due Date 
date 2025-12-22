@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Created on Mon Dec 22 17:13:45 2025
+Created on Mon Dec 22 17:27:33 2025
 
 @author: ezgieker
 """
@@ -16,86 +16,86 @@ from matplotlib.patches import Patch
 # ===============================
 #  FIGURE SIZES (match your screenshots)
 # ===============================
-FIGSIZE_MACHINE = (7.0, 3.0)   # small machine chart (like your 1st screenshot)
-FIGSIZE_STATION = (14.0, 6.0)  # big station chart (like your 2nd screenshot)
+FIGSIZE_MACHINE = (7.0, 3.0)   # small machine chart
+FIGSIZE_STATION = (14.0, 6.0)  # big station chart
+FIGSIZE_DUE     = (4.8, 3.0)   # release/due scatter like your example
 FIG_DPI = 120
 
 # ===============================
-#  DATA (LARGE EXAMPLE – 8 jobs, 30 ops)
+#  DATA – SCENARIO: One Very Urgent Job (Job 1, 10 operations)
 # ===============================
 
+# Jobs
 J = [1, 2, 3, 4, 5, 6, 7, 8]
+
+# Operations
 I = list(range(1, 31))  # 1..30
 
+# Job -> operations mapping (O_j)
+# Job 1: 10 operations (urgent job)
 O_j = {
-    1: [1, 2, 3],
-    2: [4, 5, 6, 7],
-    3: [8, 9, 10, 11, 12],
-    4: [13, 14],
-    5: [15, 16, 17, 18],
-    6: [19, 20, 21],
-    7: [22, 23, 24, 25, 26],
-    8: [27, 28, 29, 30],
+    1: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10],
+    2: [11, 12, 13, 14],
+    3: [15, 16, 17, 18],
+    4: [19, 20],
+    5: [21, 22, 23],
+    6: [24, 25],
+    7: [26, 27, 28],
+    8: [29, 30],
 }
 
 # ===============================
-#  MACHINES (12 pcs, 2 TYPES) & STATIONS
+#  MACHINES, MACHINE TYPES & STATIONS
 # ===============================
 
-M = list(range(1, 13))  # 1..12
-K = [1, 2]
+# 4 physical machines
+M = [1, 2, 3, 4]
+
+# 2 machine types
+K = [1, 2]  # 1=TIG, 2=MAG
 
 machine_type = {
-    1: 1, 2: 1, 3: 1,       # TIG
-    4: 2, 5: 2, 6: 2, 7: 2,
-    8: 2, 9: 2, 10: 2, 11: 2, 12: 2
+    1: 1,  # TIG
+    2: 1,  # TIG
+    3: 2,  # MAG
+    4: 2,  # MAG
 }
 
+# Feasible machine types K_i
+# i%3==1 -> TIG, i%3==2 -> MAG, i%3==0 -> both
 K_i = {}
 for i in I:
-    K_i[i] = [1] if i % 2 == 1 else [2]
+    r = i % 3
+    if r == 1:
+        K_i[i] = [1]
+    elif r == 2:
+        K_i[i] = [2]
+    else:
+        K_i[i] = [1, 2]
 
+# Feasible machines M_i induced by types
 M_i = {i: [m for m in M if machine_type[m] in K_i[i]] for i in I}
 
+# Stations
 L = [1, 2, 3, 4]
 L_i = {i: [1, 2, 3, 4] for i in I}
-L_big = [1]
-L_small = [2, 3, 4]
+
+L_big   = [1, 2, 3]
+L_small = [4]
 
 # ===============================
-#  PRECEDENCE
+#  PRECEDENCE (linear inside each job)
 # ===============================
 
 Pred_i = {i: [] for i in I}
 
-Pred_i[2] = [1]
-Pred_i[3] = [1]
+# linear chain: op(k-1) -> op(k)
+for j in J:
+    ops = O_j[j]
+    for k in range(1, len(ops)):
+        Pred_i[ops[k]].append(ops[k - 1])
 
-Pred_i[5] = [4]
-Pred_i[6] = [4]
-Pred_i[7] = [5]
-
-Pred_i[9]  = [8]
-Pred_i[10] = [8]
-Pred_i[11] = [9, 10]
-Pred_i[12] = [11]
-
-Pred_i[14] = [13]
-
-Pred_i[16] = [15]
-Pred_i[17] = [15]
-Pred_i[18] = [16]
-
-Pred_i[21] = [19, 20]
-
-Pred_i[23] = [22]
-Pred_i[24] = [22]
-Pred_i[25] = [23]
-Pred_i[26] = [24]
-
-# Job 8: no internal precedence
-
-# Each job's last op after all ops in that job
+# extra: last op after all ops in that job (redundant but ok)
 for j in J:
     ops = O_j[j]
     last = ops[-1]
@@ -117,51 +117,47 @@ for i in I:
         p_im[(i, m)] = float(base + machine_add)
 
 # ===============================
-#  RELEASE TIMES r_j
+#  RELEASE TIMES – all 0
 # ===============================
 
-r_j = {}
-release_times = [0.0, 2.0, 4.0, 6.0, 8.0, 10.0, 12.0, 14.0]
-for idx, j in enumerate(J):
-    r_j[j] = release_times[idx]
+r_j = {j: 0.0 for j in J}
 
 # ===============================
-#  DUE DATES d_j
+#  DUE DATES – Job 1 extremely urgent
 # ===============================
 
-d_i = {}
-due_base = 30.0
-Iend = [O_j[j][-1] for j in J]
-for idx, i_last in enumerate(Iend):
-    d_i[i_last] = due_base + 3.0 * idx  # 30,33,...,51
-
-d_j = {j: d_i[O_j[j][-1]] for j in J}
-
-# If you want: make job 8 very tight (bariz tardy)
-# d_j[8] = 25.0
+d_j = {
+    1: 25.0,   # VERY tight
+    2: 80.0,
+    3: 90.0,
+    4: 85.0,
+    5: 100.0,
+    6: 95.0,
+    7: 110.0,
+    8: 120.0,
+}
 
 # ===============================
-#  GRINDING & PAINTING
+#  Grinding / Painting
 # ===============================
 
-g_j = {j: (1 if (j-1) % 2 == 0 else 0) for j in J}  # j=1,3,5,7 => 1
-p_j = {j: (1 if (j in [1, 2, 3]) else 0) for j in J}
+g_j = {1: 1, 2: 0, 3: 1, 4: 0, 5: 1, 6: 0, 7: 1, 8: 0}
+p_j = {1: 1, 2: 1, 3: 1, 4: 0, 5: 0, 6: 0, 7: 0, 8: 0}
 
 t_grind_j = {}
 t_paint_j = {}
 for j in J:
     last_op = O_j[j][-1]
-    t_grind_j[j] = 2.0 + (last_op % 2)
+    t_grind_j[j] = 2.0 + (last_op % 2)      # 2 or 3
     t_paint_j[j] = 3.0 if p_j[j] == 1 else 0.0
 
 # ===============================
-#  BIG-STATION REQUIREMENT beta_i
+#  BIG-STATION REQUIREMENT
+#  (only end operations require big station in this scenario)
 # ===============================
 
-beta_i = {}
-first_ops = [O_j[j][0] for j in J]
-for i in I:
-    beta_i[i] = 0 if i in first_ops else 1
+Iend = [O_j[j][-1] for j in J]
+beta_i = {i: (1 if i in Iend else 0) for i in I}
 
 # ===============================
 #  JOB COLORS (same palette as your example)
@@ -191,6 +187,7 @@ def get_job_of_map(J, O_j):
 
 def verify_data():
     print("\n=== DATA VERIFICATION ===")
+
     all_ops = set().union(*[set(O_j[j]) for j in J])
     if set(I) != all_ops:
         print("[WARNING] I and union(O_j) mismatch!")
@@ -220,15 +217,35 @@ def verify_data():
     else:
         print("[ERROR] d_j missing keys:", set(J) - set(d_j.keys()))
 
+    # Big-station feasibility sanity
     for i in I:
         if beta_i[i] == 1:
             feas = [l for l in L_i[i] if l not in L_small]
             if len(feas) == 0:
-                raise ValueError(f"Op {i} requires big station but has no big station feasible!")
+                raise ValueError(f"Op {i} requires BIG station but has no BIG station feasible!")
     print("OK: big-station feasibility consistent.")
 
 # ===============================
-#  COLORED GANTT PLOTS (with your desired sizes)
+#  DUE DATE / RELEASE PLOT (your example)
+# ===============================
+
+def plot_release_due_dates(J, r_j, d_j, title="Release and due dates per job",
+                           figsize=FIGSIZE_DUE, dpi=FIG_DPI):
+    plt.figure(figsize=figsize, dpi=dpi)
+    jobs = list(J)
+    releases = [r_j[j] for j in jobs]
+    dues = [d_j[j] for j in jobs]
+
+    plt.scatter(releases, jobs, marker="o", label="release")
+    plt.scatter(dues, jobs, marker="x", label="due")
+    plt.xlabel("Time")
+    plt.ylabel("Job")
+    plt.title(title)
+    plt.legend()
+    plt.tight_layout()
+
+# ===============================
+#  COLORED GANTT PLOTS + LEGEND
 # ===============================
 
 def _legend_job_key():
@@ -297,7 +314,7 @@ def plot_gantt_by_station_colored(I, L, S, C, assign_station, job_of,
                fontsize=10, title_fontsize=11)
 
 # ===============================
-#  HEURISTIC: GT + ATCS (LESS OPTIMIZATION INSIDE)
+#  HEURISTIC: GT + ATCS
 # ===============================
 
 def heuristic_GT_ATCS(k1=2.0):
@@ -330,7 +347,7 @@ def heuristic_GT_ATCS(k1=2.0):
 
     def feasible_stations(i):
         if beta_i[i] == 1:
-            return [l for l in L_i[i] if l not in L_small]
+            return [l for l in L_i[i] if l not in L_small]  # only BIG
         return list(L_i[i])
 
     while len(scheduled) < len(I):
@@ -407,20 +424,24 @@ def heuristic_GT_ATCS(k1=2.0):
 def check_solution(S, C, assign_machine, assign_station, tol=1e-6):
     job_of = get_job_of_map(J, O_j)
 
+    # precedence
     for i in I:
         for h in Pred_i[i]:
             if S[i] + tol < C[h]:
                 raise AssertionError(f"Precedence violated: {h}->{i} (S[{i}]={S[i]:.2f} < C[{h}]={C[h]:.2f})")
 
+    # release
     for i in I:
         j = job_of[i]
         if S[i] + tol < r_j[j]:
             raise AssertionError(f"Release violated: op {i} starts {S[i]:.2f} < r_j[{j}]={r_j[j]:.2f}")
 
+    # big station
     for i in I:
         if beta_i[i] == 1 and assign_station[i] in L_small:
             raise AssertionError(f"Big-station violated: op {i} on station {assign_station[i]}")
 
+    # no overlap machine
     for m in M:
         ops = [i for i in I if assign_machine[i] == m]
         ops.sort(key=lambda i: S[i])
@@ -428,6 +449,7 @@ def check_solution(S, C, assign_machine, assign_station, tol=1e-6):
             if C[a] > S[b] + tol:
                 raise AssertionError(f"Machine overlap on {m}: ops {a},{b}")
 
+    # no overlap station
     for l in L:
         ops = [i for i in I if assign_station[i] == l]
         ops.sort(key=lambda i: S[i])
@@ -444,6 +466,10 @@ def check_solution(S, C, assign_machine, assign_station, tol=1e-6):
 if __name__ == "__main__":
     verify_data()
 
+    # NEW: due/release scatter plot (your example figure)
+    plot_release_due_dates(J, r_j, d_j, title="Release and due dates per job",
+                           figsize=FIGSIZE_DUE, dpi=FIG_DPI)
+
     S, C, am, al, Cw, Cf, T, T_max, C_max = heuristic_GT_ATCS(k1=2.0)
 
     print("\n===== Objective (Heuristic GT+ATCS) =====")
@@ -452,7 +478,8 @@ if __name__ == "__main__":
 
     print("\n===== Jobs =====")
     for j in J:
-        print(f"Job {j}: C_weld={Cw[j]:.2f}, C_final={Cf[j]:.2f}, T_j={T[j]:.2f}, d_j={d_j[j]:.2f}")
+        print(f"Job {j}: C_weld={Cw[j]:.2f}, C_final={Cf[j]:.2f}, "
+              f"T_j={T[j]:.2f}, d_j={d_j[j]:.2f}")
 
     check_solution(S, C, am, al)
 
