@@ -21,7 +21,7 @@
   },
 
   "urgent_job": {
-    "job_id": 99,
+    "job_id": 9,
 
     "release_time_mode": "t0",
     "due_time_mode": "t0_plus",
@@ -29,7 +29,7 @@
 
     "ops": [
       {
-        "op_id": 1001,
+        "op_id": 31,
         "processing_time_by_machine": {
           "2": 50.0,
           "3": 40.0,
@@ -39,7 +39,7 @@
         "beta_big_station_required": false
       },
       {
-        "op_id": 1002,
+        "op_id": 32,
         "processing_time_by_machine": {
           "2": 60.0,
           "3": 70.5,
