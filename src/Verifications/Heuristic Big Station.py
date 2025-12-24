@@ -1,31 +1,46 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Created on Mon Dec 22 17:13:45 2025
+Created on Wed Dec 24 12:03:12 2025
 
 @author: ezgieker
 """
 
 #!/usr/bin/env python3
-# -*- coding: utf-8 -*-
+# -- coding: utf-8 --
+
+"""
+Welding Shop Scheduling – HEURISTIC (GT + ATCS) using the SAME DATA
+- 8 jobs, 30 ops
+- 12 machines (TIG/MAG), 4 stations (only station 1 is big)
+- Most operations require BIG station
+- Data arranged to create tardiness
+
+This script DOES NOT solve MIP with Gurobi.
+It builds a feasible schedule using:
+  Giffler–Thompson (GT) selection + ATCS-style priority rule
+and then checks feasibility + prints results + plots Gantt charts.
+
+Author: Teknopar / Heuristic version requested
+"""
 
 import math
+from collections import defaultdict
+
+# Gurobi is imported because you asked "gurobi kodu",
+# but here we don't optimize; we only use it optionally later.
+from gurobipy import Model, GRB  # noqa: F401
+
 import matplotlib.pyplot as plt
 from matplotlib.patches import Patch
 
-# ===============================
-#  FIGURE SIZES (match your screenshots)
-# ===============================
-FIGSIZE_MACHINE = (7.0, 3.0)   # small machine chart (like your 1st screenshot)
-FIGSIZE_STATION = (14.0, 6.0)  # big station chart (like your 2nd screenshot)
-FIG_DPI = 120
 
 # ===============================
-#  DATA (LARGE EXAMPLE – 8 jobs, 30 ops)
+#  DATA (8 jobs, 30 ops)  (same as you sent)
 # ===============================
 
 J = [1, 2, 3, 4, 5, 6, 7, 8]
-I = list(range(1, 31))  # 1..30
+I = list(range(1, 31))
 
 O_j = {
     1: [1, 2, 3],
@@ -38,34 +53,30 @@ O_j = {
     8: [27, 28, 29, 30],
 }
 
-# ===============================
-#  MACHINES (12 pcs, 2 TYPES) & STATIONS
-# ===============================
-
-M = list(range(1, 13))  # 1..12
-K = [1, 2]
-
-machine_type = {
-    1: 1, 2: 1, 3: 1,       # TIG
-    4: 2, 5: 2, 6: 2, 7: 2,
-    8: 2, 9: 2, 10: 2, 11: 2, 12: 2
-}
-
-K_i = {}
-for i in I:
-    K_i[i] = [1] if i % 2 == 1 else [2]
-
-M_i = {i: [m for m in M if machine_type[m] in K_i[i]] for i in I}
-
-L = [1, 2, 3, 4]
-L_i = {i: [1, 2, 3, 4] for i in I}
+M = list(range(1, 13))   # 1..12 machines
+L = [1, 2, 3, 4]         # 4 stations
 L_big = [1]
 L_small = [2, 3, 4]
 
-# ===============================
-#  PRECEDENCE
-# ===============================
+# Machines types
+# 1..3 TIG, 4..12 MAG
+machine_type = {
+    1: 1, 2: 1, 3: 1,
+    4: 2, 5: 2, 6: 2, 7: 2, 8: 2, 9: 2, 10: 2, 11: 2, 12: 2
+}
 
+# Operation -> allowed machine TYPES (odd TIG, even MAG)
+K_i = {}
+for i in I:
+    K_i[i] = [1] if (i % 2 == 1) else [2]
+
+# Operation -> feasible machines
+M_i = {i: [m for m in M if machine_type[m] in K_i[i]] for i in I}
+
+# Stations feasible (all)
+L_i = {i: [1, 2, 3, 4] for i in I}
+
+# Precedence
 Pred_i = {i: [] for i in I}
 
 Pred_i[2] = [1]
@@ -75,7 +86,7 @@ Pred_i[5] = [4]
 Pred_i[6] = [4]
 Pred_i[7] = [5]
 
-Pred_i[9]  = [8]
+Pred_i[9] = [8]
 Pred_i[10] = [8]
 Pred_i[11] = [9, 10]
 Pred_i[12] = [11]
@@ -93,60 +104,47 @@ Pred_i[24] = [22]
 Pred_i[25] = [23]
 Pred_i[26] = [24]
 
-# Job 8: no internal precedence
+# Job 8 no internal precedence (except the "last after all" rule below)
 
-# Each job's last op after all ops in that job
+# Extra step: last op after all ops of same job
 for j in J:
     ops = O_j[j]
     last = ops[-1]
     preds = set(Pred_i[last])
-    for i_op in ops:
-        if i_op != last:
-            preds.add(i_op)
+    for op in ops:
+        if op != last:
+            preds.add(op)
     Pred_i[last] = list(preds)
 
-# ===============================
-#  PROCESSING TIMES p_im
-# ===============================
-
+# Processing times p_im (HEAVIER)
 p_im = {}
 for i in I:
     for m in M_i[i]:
-        base = 3 + (i % 5)          # 3..7
-        machine_add = (m - 1) * 0.5
+        base = 6 + (i % 7)            # 6..12
+        machine_add = (m - 1) * 0.8   # spread
         p_im[(i, m)] = float(base + machine_add)
 
-# ===============================
-#  RELEASE TIMES r_j
-# ===============================
+# Release times r_j (0,2,4,...,14)
+r_j = {j: float(2 * (j - 1)) for j in J}
 
-r_j = {}
-release_times = [0.0, 2.0, 4.0, 6.0, 8.0, 10.0, 12.0, 14.0]
-for idx, j in enumerate(J):
-    r_j[j] = release_times[idx]
-
-# ===============================
-#  DUE DATES d_j
-# ===============================
-
-d_i = {}
-due_base = 30.0
+# Due dates d_j (tight)
+# 22..29
 Iend = [O_j[j][-1] for j in J]
+d_i = {}
+due_base = 22.0
 for idx, i_last in enumerate(Iend):
-    d_i[i_last] = due_base + 3.0 * idx  # 30,33,...,51
+    d_i[i_last] = due_base + 1.0 * idx
 
 d_j = {j: d_i[O_j[j][-1]] for j in J}
 
-# If you want: make job 8 very tight (bariz tardy)
-# d_j[8] = 25.0
+# Grinding requirement g_j, Painting requirement p_j
+g_j = {}
+p_j = {}
+for idx, j in enumerate(J):
+    g_j[j] = 1 if (idx % 2 == 0) else 0
+    p_j[j] = 1 if (idx in [0, 1, 2]) else 0
 
-# ===============================
-#  GRINDING & PAINTING
-# ===============================
-
-g_j = {j: (1 if (j-1) % 2 == 0 else 0) for j in J}  # j=1,3,5,7 => 1
-p_j = {j: (1 if (j in [1, 2, 3]) else 0) for j in J}
-
+# grinding/painting times
 t_grind_j = {}
 t_paint_j = {}
 for j in J:
@@ -154,320 +152,358 @@ for j in J:
     t_grind_j[j] = 2.0 + (last_op % 2)
     t_paint_j[j] = 3.0 if p_j[j] == 1 else 0.0
 
-# ===============================
-#  BIG-STATION REQUIREMENT beta_i
-# ===============================
-
+# Big-station requirement beta_i
+# Only FIRST operation flexible; others MUST be big (station 1)
 beta_i = {}
 first_ops = [O_j[j][0] for j in J]
 for i in I:
-    beta_i[i] = 0 if i in first_ops else 1
+    beta_i[i] = 0 if (i in first_ops) else 1
 
-# ===============================
-#  JOB COLORS (same palette as your example)
-# ===============================
-
-JOB_COLORS = {
-    1: "tab:blue",
-    2: "tab:orange",
-    3: "tab:green",
-    4: "tab:red",
-    5: "tab:purple",
-    6: "tab:brown",
-    7: "tab:pink",
-    8: "tab:gray",
-}
 
 # ===============================
 #  HELPERS
 # ===============================
 
-def get_job_of_map(J, O_j):
-    job_of = {}
+def op_job_map(J, O_j):
+    mp = {}
     for j in J:
-        for i in O_j[j]:
-            job_of[i] = j
-    return job_of
+        for op in O_j[j]:
+            mp[op] = j
+    return mp
 
-def verify_data():
-    print("\n=== DATA VERIFICATION ===")
-    all_ops = set().union(*[set(O_j[j]) for j in J])
-    if set(I) != all_ops:
-        print("[WARNING] I and union(O_j) mismatch!")
-        print("Missing in O_j:", sorted(set(I) - all_ops))
-        print("Extra in O_j  :", sorted(all_ops - set(I)))
-    else:
-        print("OK: I matches union(O_j).")
 
-    badM = [i for i in I if len(M_i[i]) == 0]
-    badL = [i for i in I if len(L_i[i]) == 0]
-    print("OK: machines feasible for all ops." if not badM else f"[ERROR] no machine for {badM}")
-    print("OK: stations feasible for all ops." if not badL else f"[ERROR] no station for {badL}")
+JOB_OF = op_job_map(J, O_j)
 
-    bad_pred = [(i, h) for i in I for h in Pred_i[i] if h not in I]
-    print("OK: Pred_i references are valid." if not bad_pred else f"[ERROR] bad preds {bad_pred}")
 
-    miss = [(i, m) for i in I for m in M_i[i] if (i, m) not in p_im]
-    print("OK: p_im complete." if not miss else f"[ERROR] missing p_im {miss[:10]} ...")
+def atcs_index(i, t_now, pbar, k1=2.0):
+    """
+    ATCS-like index (simplified):
+      ATCS(i,t) = (1/pi) * exp( - max(d_job - pi - t, 0) / (k1*pbar) )
+    where pi = min_m p_im(i,m)
+    """
+    j = JOB_OF[i]
+    pi = min(p_im[(i, m)] for m in M_i[i])
+    slack = max(d_j[j] - pi - t_now, 0.0)
+    return (1.0 / max(pi, 1e-9)) * math.exp(-slack / max(k1 * pbar, 1e-9))
 
-    if set(r_j.keys()) == set(J):
-        print("OK: r_j defined for all jobs.")
-    else:
-        print("[ERROR] r_j missing keys:", set(J) - set(r_j.keys()))
 
-    if set(d_j.keys()) == set(J):
-        print("OK: d_j defined for all jobs.")
-    else:
-        print("[ERROR] d_j missing keys:", set(J) - set(d_j.keys()))
-
+def compute_pbar():
+    vals = []
     for i in I:
-        if beta_i[i] == 1:
-            feas = [l for l in L_i[i] if l not in L_small]
-            if len(feas) == 0:
-                raise ValueError(f"Op {i} requires big station but has no big station feasible!")
-    print("OK: big-station feasibility consistent.")
+        for m in M_i[i]:
+            vals.append(p_im[(i, m)])
+    return sum(vals) / max(len(vals), 1)
+
+
+def check_no_overlap(intervals, tol=1e-9):
+    """
+    intervals: list of (start, end, op)
+    returns list of conflicts (op_a, op_b)
+    """
+    intervals = sorted(intervals, key=lambda x: (x[0], x[1]))
+    conflicts = []
+    for k in range(len(intervals) - 1):
+        s1, e1, o1 = intervals[k]
+        s2, e2, o2 = intervals[k + 1]
+        if s2 < e1 - tol:
+            conflicts.append((o1, o2))
+    return conflicts
+
+
+def check_heuristic_solution():
+    """
+    Checks:
+    - precedence
+    - release
+    - machine overlap
+    - station overlap
+    - big station constraint
+    """
+    print("\n=== CHECK HEURISTIC SOLUTION ===")
+
+    ok = True
+
+    # precedence
+    for i in I:
+        for h in Pred_i[i]:
+            if S[i] + 1e-9 < C[h]:
+                ok = False
+                print(f"[PREC] Violation: {h} -> {i} but S[{i}]={S[i]:.3f} < C[{h}]={C[h]:.3f}")
+
+    # release: enforce for all ops (strong form)
+    for i in I:
+        j = JOB_OF[i]
+        if S[i] + 1e-9 < r_j[j]:
+            ok = False
+            print(f"[REL] Violation: op {i} of job {j} starts before release "
+                  f"S={S[i]:.3f} < r_j={r_j[j]:.3f}")
+
+    # big station
+    for i in I:
+        if beta_i[i] == 1 and assign_station[i] not in L_big:
+            ok = False
+            print(f"[BIG] Violation: op {i} must be big but assigned station {assign_station[i]}")
+
+    # machine overlaps
+    for m in M:
+        ints = [(S[i], C[i], i) for i in I if assign_machine[i] == m]
+        conf = check_no_overlap(ints)
+        if conf:
+            ok = False
+            for a, b in conf:
+                print(f"[M-OVL] Machine {m} overlap between ops {a} and {b}")
+
+    # station overlaps
+    for l in L:
+        ints = [(S[i], C[i], i) for i in I if assign_station[i] == l]
+        conf = check_no_overlap(ints)
+        if conf:
+            ok = False
+            for a, b in conf:
+                print(f"[L-OVL] Station {l} overlap between ops {a} and {b}")
+
+    if ok:
+        print("OK: heuristic schedule is feasible.")
+    else:
+        print("ERROR: heuristic schedule has violations.")
+
 
 # ===============================
-#  COLORED GANTT PLOTS (with your desired sizes)
+#  HEURISTIC: GT + ATCS
 # ===============================
 
-def _legend_job_key():
-    return [Patch(facecolor=JOB_COLORS[j], edgecolor="black", label=f"Job {j}") for j in sorted(JOB_COLORS)]
+def heuristic_schedule(k1=2.0):
+    """
+    Returns dictionaries:
+      S[i], C[i], assign_machine[i], assign_station[i]
+    GT+ATCS steps (simplified):
+      - ready set by precedence + release
+      - for each ready op i: best (m,l) minimizing completion given availability
+      - choose i* with earliest completion (GT anchor)
+      - conflict set: ops sharing same best m or best l with i*
+      - select max ATCS from conflict set
+      - fix operation, update resource availability, continue
+    """
 
-def plot_gantt_by_machine_colored(I, M, S, C, assign_machine, job_of,
-                                  title="Machine-wise welding schedule",
-                                  figsize=FIGSIZE_MACHINE, dpi=FIG_DPI):
-    plt.figure(figsize=figsize, dpi=dpi)
+    # resource availability
+    aM = {m: 0.0 for m in M}
+    aL = {l: 0.0 for l in L}
+
+    S_local = {}
+    C_local = {}
+    mu = {}
+    lam = {}
+
+    done = set()
+    t = 0.0
+    pbar = compute_pbar()
+
+    # quick job release lookup
+    def R_i(i):
+        j = JOB_OF[i]
+        pred_done_times = [C_local[h] for h in Pred_i[i]] if Pred_i[i] else []
+        return max([r_j[j]] + pred_done_times) if pred_done_times else r_j[j]
+
+    while len(done) < len(I):
+        # candidate set: predecessors done
+        Cand = [i for i in I if (i not in done) and all(h in done for h in Pred_i[i])]
+        if not Cand:
+            raise RuntimeError("No candidates found. Precedence cycle or inconsistent data?")
+
+        # ready at time t
+        ready = [i for i in Cand if R_i(i) <= t + 1e-9]
+        if not ready:
+            t = min(R_i(i) for i in Cand)
+            ready = [i for i in Cand if R_i(i) <= t + 1e-9]
+
+        # for each ready op, compute best (m,l) with earliest completion
+        best_m = {}
+        best_l = {}
+        best_s = {}
+        best_c = {}
+
+        for i in ready:
+            Ri = R_i(i)
+
+            # feasible stations respecting big constraint
+            feasible_stations = L_i[i]
+            if beta_i[i] == 1:
+                feasible_stations = [l for l in feasible_stations if l in L_big]
+
+            best_ci = float("inf")
+            best_pair = None
+            best_si = None
+
+            for m in M_i[i]:
+                for l in feasible_stations:
+                    si = max(t, Ri, aM[m], aL[l])
+                    ci = si + p_im[(i, m)]
+                    if ci < best_ci - 1e-12:
+                        best_ci = ci
+                        best_pair = (m, l)
+                        best_si = si
+
+            if best_pair is None:
+                raise RuntimeError(f"No feasible (m,l) pair for op {i}. Check data/beta_i.")
+            best_m[i], best_l[i] = best_pair
+            best_s[i] = best_si
+            best_c[i] = best_ci
+
+        # GT anchor: i* = argmin earliest completion
+        i_star = min(ready, key=lambda i: best_c[i])
+        m_star = best_m[i_star]
+        l_star = best_l[i_star]
+
+        # conflict set: those who want same best machine OR same best station
+        Kset = [i for i in ready if (best_m[i] == m_star) or (best_l[i] == l_star)]
+        if i_star not in Kset:
+            Kset.append(i_star)
+
+        # ATCS selection among conflict set
+        chosen = max(Kset, key=lambda i: atcs_index(i, t, pbar, k1=k1))
+
+        # fix chosen op
+        m_ch = best_m[chosen]
+        l_ch = best_l[chosen]
+        s_ch = best_s[chosen]
+        c_ch = s_ch + p_im[(chosen, m_ch)]
+
+        S_local[chosen] = s_ch
+        C_local[chosen] = c_ch
+        mu[chosen] = m_ch
+        lam[chosen] = l_ch
+
+        aM[m_ch] = c_ch
+        aL[l_ch] = c_ch
+        done.add(chosen)
+
+        # update time: earliest resource free time (simple time advance)
+        t = min(min(aM.values()), min(aL.values()))
+
+    return S_local, C_local, mu, lam
+
+
+# ===============================
+#  PLOTTING (Gantt) for heuristic schedule
+# ===============================
+
+def plot_gantt_by_machine_heur(S, C, mu, title="Machine-wise schedule (heuristic)"):
+    plt.figure()
     y_ticks, y_labels = [], []
 
     for idx_m, m in enumerate(M):
-        y_ticks.append(idx_m)
+        y_pos = idx_m
+        y_ticks.append(y_pos)
         mtype = "TIG" if machine_type[m] == 1 else "MAG"
         y_labels.append(f"Machine {m} ({mtype})")
 
-        ops = [i for i in I if assign_machine.get(i, None) == m]
-        ops.sort(key=lambda i: S[i])
+        ops = [i for i in I if mu[i] == m]
+        ops = sorted(ops, key=lambda i: S[i])
 
         for i in ops:
-            j = job_of[i]
-            color = JOB_COLORS.get(j, "gray")
-            plt.barh(idx_m, C[i] - S[i], left=S[i],
-                     color=color, edgecolor="black", linewidth=0.4)
-            plt.text(S[i], idx_m, str(i), va="center", fontsize=7, color="black")
+            plt.barh(y_pos, C[i] - S[i], left=S[i])
+            plt.text(S[i], y_pos, f"{i}", va="center", fontsize=7)
 
-    plt.yticks(y_ticks, y_labels, fontsize=8)
-    plt.xlabel("Time", fontsize=9)
-    plt.title(title, fontsize=10)
+    plt.yticks(y_ticks, y_labels)
+    plt.xlabel("Time")
+    plt.title(title)
     plt.tight_layout()
-    plt.legend(handles=_legend_job_key(), title="Job Color Key",
-               bbox_to_anchor=(1.02, 1), loc="upper left",
-               fontsize=8, title_fontsize=9)
 
-def plot_gantt_by_station_colored(I, L, S, C, assign_station, job_of,
-                                  L_big=None,
-                                  title="Station-wise welding schedule",
-                                  figsize=FIGSIZE_STATION, dpi=FIG_DPI):
-    if L_big is None:
-        L_big = []
 
-    plt.figure(figsize=figsize, dpi=dpi)
+def plot_gantt_by_station_heur(S, C, lam, title="Station-wise schedule (heuristic)"):
+    fig, (ax, ax_leg) = plt.subplots(
+        1, 2, figsize=(14, 6),
+        gridspec_kw={"width_ratios": [4, 1]}
+    )
+
+    cmap = plt.cm.get_cmap("tab10")
+    job_colors = {j: cmap((j - 1) % 10) for j in J}
+
     y_ticks, y_labels = [], []
 
     for idx_l, l in enumerate(L):
-        y_ticks.append(idx_l)
-        y_labels.append(f"Station {l} (big station)" if l in L_big else f"Station {l}")
+        y_pos = idx_l
+        y_ticks.append(y_pos)
+        y_labels.append("Station 1 (big station)" if l == 1 else f"Station {l}")
 
-        ops = [i for i in I if assign_station.get(i, None) == l]
-        ops.sort(key=lambda i: S[i])
+        ops = [i for i in I if lam[i] == l]
+        ops = sorted(ops, key=lambda i: S[i])
 
         for i in ops:
-            j = job_of[i]
-            color = JOB_COLORS.get(j, "gray")
-            plt.barh(idx_l, C[i] - S[i], left=S[i],
-                     color=color, edgecolor="black", linewidth=0.4)
-            plt.text(S[i], idx_l, str(i), va="center", fontsize=9, color="black")
+            j = JOB_OF[i]
+            ax.barh(y_pos, C[i] - S[i], left=S[i], color=job_colors[j])
+            ax.text(S[i] + (C[i] - S[i]) / 2.0, y_pos, f"{i}",
+                    ha="center", va="center", fontsize=7)
 
-    plt.yticks(y_ticks, y_labels, fontsize=10)
-    plt.xlabel("Time", fontsize=11)
-    plt.title(title, fontsize=12)
-    plt.grid(axis="x", linestyle="--", linewidth=0.5, alpha=0.4)
-    plt.tight_layout()
-    plt.legend(handles=_legend_job_key(), title="Job Color Key",
-               bbox_to_anchor=(1.02, 1), loc="upper left",
-               fontsize=10, title_fontsize=11)
+    ax.set_yticks(y_ticks)
+    ax.set_yticklabels(y_labels)
+    ax.set_xlabel("Time")
+    ax.set_title(title)
+    ax.grid(True, linestyle="--", alpha=0.3)
+
+    # legend panel
+    ax_leg.set_axis_off()
+    ax_leg.set_title("Job Color Key", fontsize=12, pad=10)
+
+    y0 = 0.9
+    dy = 0.7 / max(len(J), 1)
+    for idx, j in enumerate(J):
+        y_pos = y0 - idx * dy
+        rect = plt.Rectangle((0.05, y_pos - 0.03), 0.12, 0.06,
+                             transform=ax_leg.transAxes,
+                             facecolor=job_colors[j], edgecolor="black")
+        ax_leg.add_patch(rect)
+        ax_leg.text(0.22, y_pos, f"Job {j}", transform=ax_leg.transAxes,
+                    va="center", ha="left", fontsize=10)
+
+    fig.tight_layout()
+
 
 # ===============================
-#  HEURISTIC: GT + ATCS (LESS OPTIMIZATION INSIDE)
+#  RUN
 # ===============================
 
-def heuristic_GT_ATCS(k1=2.0):
-    job_of = get_job_of_map(J, O_j)
+if __name__ == "__main__":
+    print("=== HEURISTIC RUN (GT + ATCS) ===")
+    print("Scenario: BIG station bottleneck + tight due dates => tardiness expected")
 
-    p_list = [min(p_im[(i, m)] for m in M_i[i]) for i in I]
-    p_bar = sum(p_list) / len(p_list) if p_list else 1.0
+    # Build heuristic schedule
+    S, C, assign_machine, assign_station = heuristic_schedule(k1=2.0)
 
-    avail_machine = {m: 0.0 for m in M}
-    avail_station = {l: 0.0 for l in L}
-
-    S, C = {}, {}
-    assign_machine, assign_station = {}, {}
-
-    scheduled = set()
-    t = 0.0
-
-    def release_of(i):
-        j = job_of[i]
-        rt = r_j[j]
-        if Pred_i[i]:
-            rt = max(rt, max(C[h] for h in Pred_i[i]))
-        return rt
-
-    def atcs(i, t_now):
-        j = job_of[i]
-        p_i = min(p_im[(i, m)] for m in M_i[i])
-        slack = max(d_j[j] - p_i - t_now, 0.0)
-        return (1.0 / p_i) * math.exp(-slack / (k1 * p_bar))
-
-    def feasible_stations(i):
-        if beta_i[i] == 1:
-            return [l for l in L_i[i] if l not in L_small]
-        return list(L_i[i])
-
-    while len(scheduled) < len(I):
-
-        eligible = [i for i in I if i not in scheduled and all(h in scheduled for h in Pred_i[i])]
-        if not eligible:
-            raise RuntimeError("No eligible ops (cycle?)")
-
-        R = {i: release_of(i) for i in eligible}
-        ready = [i for i in eligible if R[i] <= t + 1e-9]
-
-        if not ready:
-            t = min(R[i] for i in eligible)
-            ready = [i for i in eligible if R[i] <= t + 1e-9]
-
-        best_machine = {}
-        ecomp = {}
-        for i in ready:
-            bestC = float("inf")
-            bestm = None
-            for m in M_i[i]:
-                st_m = max(t, R[i], avail_machine[m])
-                cp_m = st_m + p_im[(i, m)]
-                if cp_m < bestC:
-                    bestC = cp_m
-                    bestm = m
-            best_machine[i] = bestm
-            ecomp[i] = bestC
-
-        i_star = min(ready, key=lambda i: ecomp[i])
-        m_star = best_machine[i_star]
-
-        conflict = [i for i in ready if best_machine[i] == m_star]
-        chosen = max(conflict, key=lambda i: atcs(i, t))
-
-        m = best_machine[chosen]
-        stations = feasible_stations(chosen)
-        l = min(stations, key=lambda ll: avail_station[ll])
-
-        start = max(t, R[chosen], avail_machine[m], avail_station[l])
-        comp = start + p_im[(chosen, m)]
-
-        S[chosen] = start
-        C[chosen] = comp
-        assign_machine[chosen] = m
-        assign_station[chosen] = l
-
-        avail_machine[m] = comp
-        avail_station[l] = comp
-        scheduled.add(chosen)
-
-        next_times = []
-        next_times += [tt for tt in avail_machine.values() if tt > t + 1e-9]
-        next_times += [tt for tt in avail_station.values() if tt > t + 1e-9]
-
-        remaining = [i for i in I if i not in scheduled and all(h in scheduled for h in Pred_i[i])]
-        for i in remaining:
-            rr = release_of(i)
-            if rr > t + 1e-9:
-                next_times.append(rr)
-
-        if next_times:
-            t = min(next_times)
-
-    C_weld, C_final, T = {}, {}, {}
+    # Job-level completion
+    C_weld = {}
+    C_final = {}
+    Tard = {}
     for j in J:
         last = O_j[j][-1]
         C_weld[j] = C[last]
         C_final[j] = C_weld[j] + g_j[j] * t_grind_j[j] + p_j[j] * t_paint_j[j]
-        T[j] = C_final[j] - d_j[j]
+        Tard[j] = C_final[j] - d_j[j]  # can be negative
 
-    return S, C, assign_machine, assign_station, C_weld, C_final, T, max(T.values()), max(C_final.values())
+    Tmax = max(Tard.values())
+    Cmax = max(C_final.values())
 
-def check_solution(S, C, assign_machine, assign_station, tol=1e-6):
-    job_of = get_job_of_map(J, O_j)
-
-    for i in I:
-        for h in Pred_i[i]:
-            if S[i] + tol < C[h]:
-                raise AssertionError(f"Precedence violated: {h}->{i} (S[{i}]={S[i]:.2f} < C[{h}]={C[h]:.2f})")
-
-    for i in I:
-        j = job_of[i]
-        if S[i] + tol < r_j[j]:
-            raise AssertionError(f"Release violated: op {i} starts {S[i]:.2f} < r_j[{j}]={r_j[j]:.2f}")
-
-    for i in I:
-        if beta_i[i] == 1 and assign_station[i] in L_small:
-            raise AssertionError(f"Big-station violated: op {i} on station {assign_station[i]}")
-
-    for m in M:
-        ops = [i for i in I if assign_machine[i] == m]
-        ops.sort(key=lambda i: S[i])
-        for a, b in zip(ops, ops[1:]):
-            if C[a] > S[b] + tol:
-                raise AssertionError(f"Machine overlap on {m}: ops {a},{b}")
-
-    for l in L:
-        ops = [i for i in I if assign_station[i] == l]
-        ops.sort(key=lambda i: S[i])
-        for a, b in zip(ops, ops[1:]):
-            if C[a] > S[b] + tol:
-                raise AssertionError(f"Station overlap on {l}: ops {a},{b}")
-
-    print("All checks passed.")
-
-# ===============================
-#  MAIN
-# ===============================
-
-if __name__ == "__main__":
-    verify_data()
-
-    S, C, am, al, Cw, Cf, T, T_max, C_max = heuristic_GT_ATCS(k1=2.0)
-
-    print("\n===== Objective (Heuristic GT+ATCS) =====")
-    print(f"T_max = {T_max:.2f}")
-    print(f"C_max = {C_max:.2f}")
+    # Print results
+    print("\n===== Objective-like KPIs (heuristic evaluation) =====")
+    print(f"T_max = {Tmax:.2f}")
+    print(f"C_max = {Cmax:.2f}")
 
     print("\n===== Jobs =====")
     for j in J:
-        print(f"Job {j}: C_weld={Cw[j]:.2f}, C_final={Cf[j]:.2f}, T_j={T[j]:.2f}, d_j={d_j[j]:.2f}")
+        print(f"Job {j}: C_weld={C_weld[j]:.2f}, C_final={C_final[j]:.2f}, "
+              f"T_j={Tard[j]:.2f}, d_j={d_j[j]:.2f}, r_j={r_j[j]:.2f}")
 
-    check_solution(S, C, am, al)
+    print("\n===== Operations =====")
+    for i in I:
+        m_sel = assign_machine[i]
+        l_sel = assign_station[i]
+        mtype_str = "TIG" if machine_type[m_sel] == 1 else "MAG"
+        print(f"Op {i}: S={S[i]:.2f}, C={C[i]:.2f}, machine={m_sel} ({mtype_str}), station={l_sel}")
 
-    job_of = get_job_of_map(J, O_j)
+    # Feasibility check
+    check_heuristic_solution()
 
-    plot_gantt_by_machine_colored(
-        I, M, S, C, am, job_of,
-        title="Machine-wise welding schedule",
-        figsize=FIGSIZE_MACHINE, dpi=FIG_DPI
-    )
-    plot_gantt_by_station_colored(
-        I, L, S, C, al, job_of,
-        L_big=L_big,
-        title="Station-wise welding schedule",
-        figsize=FIGSIZE_STATION, dpi=FIG_DPI
-    )
-
+    # Gantt plots
+    plot_gantt_by_machine_heur(S, C, assign_machine, title="Machine-wise welding schedule ")
+    plot_gantt_by_station_heur(S, C, assign_station, title="Station-wise welding schedule ")
     plt.show()
