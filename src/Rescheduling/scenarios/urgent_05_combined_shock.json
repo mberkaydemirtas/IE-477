@@ -1,18 +1,18 @@
 {
   "urgent_job": {
-    "job_id": 100,
+    "job_id": 9,
     "release_time_mode": "t0",
     "due_time_mode": "t0_plus",
     "due_time_hours": 2,
     "ops": [
       {
-        "op_id": null,
+        "op_id": 31,
         "feasible_stations": [4,5,6,7,8,9],
         "processing_time_by_machine": {"2": 20.0, "3": 20.2, "4": 20.4},
         "beta_big_station_required": false
       },
       {
-        "op_id": null,
+        "op_id": 32,
         "feasible_stations": [1,2,3],
         "processing_time_by_machine": {"2": 20.8, "3": 20.1, "4": 20.4},
         "beta_big_station_required": true
