@@ -1,6 +1,7 @@
 {
   "plan_start_iso": "2025-12-18T05:00:00+00:00",
   "objective": {
+    "T_max": 8.099999998173045,
     "C_max": 50.0
   },
   "schedule": [
@@ -11,12 +12,16 @@
       "start": 0.0,
       "finish": 4.5,
       "machine": 2,
+      "station": 7
     },
     {
       "op_id": 2,
       "op_label": "2",
       "job_id": 1,
       "start": 4.5,
+      "finish": 12.0,
+      "machine": 6,
+      "station": 3
     },
     {
       "op_id": 3,
