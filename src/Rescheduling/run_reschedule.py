@@ -375,7 +375,8 @@ def main():
             old_solution=baseline,
             unavailable_machines=unavailable_machines,
             unavailable_stations=unavailable_stations,
-            mode=mode
+            mode=mode,
+            t0=10
         )
 
     res["scenario_name"] = scenario_name

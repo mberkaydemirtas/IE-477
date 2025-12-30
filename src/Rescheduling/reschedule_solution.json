@@ -31,15 +31,36 @@
     ],
     "I_run": [
       21,
+<<<<<<< Updated upstream
+=======
+<<<<<<< HEAD
+      26
+    ],
+    "I_free": [
+      27,
+=======
+>>>>>>> Stashed changes
       26,
       27
     ],
     "I_free": [
+<<<<<<< Updated upstream
+=======
+>>>>>>> 669b3011590e580813f476cbf650bbac1c8256a7
+>>>>>>> Stashed changes
       30
     ]
   },
   "objective": {
+<<<<<<< Updated upstream
     "T_max": 20.2,
+=======
+<<<<<<< HEAD
+    "T_max": 20.4,
+=======
+    "T_max": 20.2,
+>>>>>>> 669b3011590e580813f476cbf650bbac1c8256a7
+>>>>>>> Stashed changes
     "C_max": 63.0
   },
   "urgent": {
@@ -48,14 +69,33 @@
       31,
       32
     ],
+<<<<<<< Updated upstream
     "C_final": 62.2,
     "T": 20.2,
+=======
+<<<<<<< HEAD
+    "C_final": 62.4,
+    "T": 20.4,
+=======
+    "C_final": 62.2,
+    "T": 20.2,
+>>>>>>> 669b3011590e580813f476cbf650bbac1c8256a7
+>>>>>>> Stashed changes
     "d": 42.0
   },
   "keep_decisions": {
     "21": 0,
+<<<<<<< Updated upstream
     "26": 0,
     "27": 1
+=======
+<<<<<<< HEAD
+    "26": 0
+=======
+    "26": 0,
+    "27": 1
+>>>>>>> 669b3011590e580813f476cbf650bbac1c8256a7
+>>>>>>> Stashed changes
   },
   "schedule": [
     {
@@ -65,16 +105,16 @@
       "start": 0.0,
       "finish": 4.5,
       "machine": 2,
-      "station": 1
+      "station": 7
     },
     {
       "op_id": 2,
       "op_label": "2",
       "job_id": 1,
       "start": 4.5,
-      "finish": 12.5,
-      "machine": 7,
-      "station": 1
+      "finish": 12.0,
+      "machine": 6,
+      "station": 3
     },
     {
       "op_id": 3,
@@ -89,35 +129,35 @@
       "op_id": 4,
       "op_label": "4",
       "job_id": 2,
-      "start": 8.5,
-      "finish": 17.5,
-      "machine": 5,
-      "station": 4
+      "start": 2.0,
+      "finish": 10.0,
+      "machine": 3,
+      "station": 9
     },
     {
       "op_id": 5,
       "op_label": "5",
       "job_id": 2,
-      "start": 19.0,
-      "finish": 22.5,
+      "start": 18.999999999314838,
+      "finish": 22.499999999314838,
       "machine": 2,
-      "station": 7
+      "station": 3
     },
     {
       "op_id": 6,
       "op_label": "6",
       "job_id": 2,
-      "start": 17.5,
-      "finish": 22.5,
+      "start": 10.0,
+      "finish": 14.999999998863146,
       "machine": 3,
-      "station": 8
+      "station": 9
     },
     {
       "op_id": 7,
       "op_label": "7",
       "job_id": 2,
-      "start": 22.5,
-      "finish": 27.5,
+      "start": 22.49999999817306,
+      "finish": 27.499999998173042,
       "machine": 1,
       "station": 3
     },
@@ -126,45 +166,45 @@
       "op_label": "8",
       "job_id": 3,
       "start": 4.0,
-      "finish": 11.0,
-      "machine": 3,
-      "station": 7
+      "finish": 11.5,
+      "machine": 4,
+      "station": 5
     },
     {
       "op_id": 9,
       "op_label": "9",
       "job_id": 3,
       "start": 11.5,
-      "finish": 18.5,
+      "finish": 18.499999999090203,
       "machine": 1,
-      "station": 3
+      "station": 5
     },
     {
       "op_id": 10,
       "op_label": "10",
       "job_id": 3,
-      "start": 11.0,
+      "start": 11.5,
       "finish": 16.5,
-      "machine": 6,
-      "station": 7
+      "machine": 5,
+      "station": 6
     },
     {
       "op_id": 11,
       "op_label": "11",
       "job_id": 3,
-      "start": 18.5,
-      "finish": 22.5,
+      "start": 18.499999999090203,
+      "finish": 22.499999999090235,
       "machine": 1,
-      "station": 6
+      "station": 8
     },
     {
       "op_id": 12,
       "op_label": "12",
       "job_id": 3,
-      "start": 22.5,
-      "finish": 28.5,
+      "start": 22.499999999090203,
+      "finish": 28.499999999090203,
       "machine": 3,
-      "station": 2
+      "station": 1
     },
     {
       "op_id": 13,
@@ -173,16 +213,16 @@
       "start": 6.0,
       "finish": 12.5,
       "machine": 2,
-      "station": 8
+      "station": 4
     },
     {
       "op_id": 14,
       "op_label": "14",
       "job_id": 4,
-      "start": 20.5,
-      "finish": 31.0,
-      "machine": 8,
-      "station": 1
+      "start": 28.399999998173044,
+      "finish": 36.899999998173044,
+      "machine": 4,
+      "station": 2
     },
     {
       "op_id": 15,
@@ -191,113 +231,144 @@
       "start": 8.5,
       "finish": 11.5,
       "machine": 1,
-      "station": 6
+      "station": 8
     },
     {
       "op_id": 16,
       "op_label": "16",
       "job_id": 5,
-      "start": 11.5,
-      "finish": 21.0,
+      "start": 14.999999998863146,
+      "finish": 24.499999998863174,
       "machine": 12,
-      "station": 5
+      "station": 9
     },
     {
       "op_id": 17,
       "op_label": "17",
       "job_id": 5,
-      "start": 22.5,
-      "finish": 28.0,
+      "start": 22.499999999314838,
+      "finish": 27.999999999314838,
       "machine": 2,
-      "station": 9
+      "station": 4
     },
     {
       "op_id": 18,
       "op_label": "18",
       "job_id": 5,
-      "start": 28.5,
-      "finish": 35.5,
-      "machine": 3,
-      "station": 2
+      "start": 27.999999999314838,
+      "finish": 35.99999999931484,
+      "machine": 5,
+      "station": 3
     },
     {
       "op_id": 19,
       "op_label": "19",
       "job_id": 6,
-      "start": 28.8,
-      "finish": 36.3,
-      "machine": 2,
-      "station": 4
+      "start": 27.49999999931481,
+      "finish": 34.49999999931484,
+      "machine": 1,
+      "station": 7
     },
     {
       "op_id": 20,
       "op_label": "20",
       "job_id": 6,
-      "start": 0.0,
-      "finish": 8.0,
-      "machine": 11,
-      "station": 3
+      "start": 21.899999998173016,
+      "finish": 28.399999998173044,
+      "machine": 8,
+      "station": 2
     },
     {
       "op_id": 21,
       "op_label": "21",
       "job_id": 6,
+<<<<<<< Updated upstream
+=======
+<<<<<<< HEAD
+      "start": 35.699999999091744,
+      "finish": 40.0,
+      "machine": 2,
+      "station": 1
+=======
+>>>>>>> Stashed changes
       "start": 39.3,
       "finish": 40.0,
       "machine": 1,
       "station": 2
+<<<<<<< Updated upstream
+=======
+>>>>>>> 669b3011590e580813f476cbf650bbac1c8256a7
+>>>>>>> Stashed changes
     },
     {
       "op_id": 22,
       "op_label": "22",
       "job_id": 7,
       "start": 12.0,
-      "finish": 20.5,
-      "machine": 8,
-      "station": 2
+      "finish": 18.5,
+      "machine": 4,
+      "station": 7
     },
     {
       "op_id": 23,
       "op_label": "23",
       "job_id": 7,
-      "start": 30.3,
-      "finish": 36.3,
-      "machine": 1,
-      "station": 9
+      "start": 27.999999999314838,
+      "finish": 34.49999999931484,
+      "machine": 2,
+      "station": 8
     },
     {
       "op_id": 24,
       "op_label": "24",
       "job_id": 7,
-      "start": 21.0,
-      "finish": 30.0,
-      "machine": 5,
-      "station": 5
+      "start": 18.5,
+      "finish": 29.5,
+      "machine": 9,
+      "station": 6
     },
     {
       "op_id": 25,
       "op_label": "25",
       "job_id": 7,
-      "start": 36.3,
-      "finish": 39.3,
+      "start": 34.49999999931484,
+      "finish": 37.499999999090704,
       "machine": 1,
-      "station": 4
+      "station": 5
     },
     {
       "op_id": 26,
       "op_label": "26",
       "job_id": 7,
+<<<<<<< Updated upstream
+=======
+<<<<<<< HEAD
+      "start": 37.499999999090704,
+      "finish": 40.0,
+      "machine": 7,
+      "station": 2
+=======
+>>>>>>> Stashed changes
       "start": 39.5,
       "finish": 40.0,
       "machine": 3,
       "station": 3
+>>>>>>> 669b3011590e580813f476cbf650bbac1c8256a7
     },
     {
       "op_id": 27,
       "op_label": "27",
       "job_id": 8,
+<<<<<<< HEAD
+      "start": 44.699999998172004,
+      "finish": 50.199999998172004,
+=======
       "start": 36.3,
       "finish": 41.8,
+<<<<<<< Updated upstream
+=======
+>>>>>>> 669b3011590e580813f476cbf650bbac1c8256a7
+>>>>>>> Stashed changes
       "machine": 2,
       "station": 5
     },
@@ -306,26 +377,38 @@
       "op_label": "28",
       "job_id": 8,
       "start": 0.0,
-      "finish": 9.5,
-      "machine": 8,
-      "station": 5
+      "finish": 10.5,
+      "machine": 10,
+      "station": 1
     },
     {
       "op_id": 29,
       "op_label": "29",
       "job_id": 8,
-      "start": 1.5,
-      "finish": 8.5,
+      "start": 0.0,
+      "finish": 7.0,
       "machine": 1,
-      "station": 4
+      "station": 2
     },
     {
       "op_id": 30,
       "op_label": "30",
       "job_id": 8,
+<<<<<<< Updated upstream
       "start": 41.8,
       "finish": 47.3,
       "machine": 6,
+=======
+<<<<<<< HEAD
+      "start": 50.19999999817011,
+      "finish": 56.69999999816875,
+      "machine": 8,
+=======
+      "start": 41.8,
+      "finish": 47.3,
+      "machine": 6,
+>>>>>>> 669b3011590e580813f476cbf650bbac1c8256a7
+>>>>>>> Stashed changes
       "station": 3
     },
     {
@@ -333,33 +416,78 @@
       "op_label": "31",
       "job_id": 9,
       "start": 40.0,
+<<<<<<< Updated upstream
       "finish": 60.2,
       "machine": 3,
       "station": 4
+=======
+<<<<<<< HEAD
+      "finish": 60.4,
+      "machine": 4,
+      "station": 7
+=======
+      "finish": 60.2,
+      "machine": 3,
+      "station": 4
+>>>>>>> 669b3011590e580813f476cbf650bbac1c8256a7
+>>>>>>> Stashed changes
     },
     {
       "op_id": 32,
       "op_label": "32",
       "job_id": 9,
+<<<<<<< Updated upstream
       "start": 31.0,
       "finish": 51.4,
       "machine": 4,
+=======
+<<<<<<< HEAD
+      "start": 40.0,
+      "finish": 60.1,
+      "machine": 3,
+=======
+      "start": 31.0,
+      "finish": 51.4,
+      "machine": 4,
+>>>>>>> 669b3011590e580813f476cbf650bbac1c8256a7
+>>>>>>> Stashed changes
       "station": 1
     },
     {
       "op_id": 33,
       "op_label": "21(cont)",
       "job_id": 6,
+<<<<<<< Updated upstream
+=======
+<<<<<<< HEAD
+      "start": 44.49999999908131,
+      "finish": 44.69999999817341,
+      "machine": 2,
+      "station": 6
+=======
+>>>>>>> Stashed changes
       "start": 44.5,
       "finish": 47.8,
       "machine": 2,
       "station": 9
+<<<<<<< Updated upstream
+=======
+>>>>>>> 669b3011590e580813f476cbf650bbac1c8256a7
+>>>>>>> Stashed changes
     },
     {
       "op_id": 34,
       "op_label": "26(cont)",
       "job_id": 7,
       "start": 40.0,
+<<<<<<< Updated upstream
+=======
+<<<<<<< HEAD
+      "finish": 44.49999999908852,
+      "machine": 11,
+      "station": 6
+=======
+>>>>>>> Stashed changes
       "finish": 44.5,
       "machine": 9,
       "station": 9
@@ -372,18 +500,54 @@
       "finish": 41.8,
       "machine": null,
       "station": null
+<<<<<<< Updated upstream
+=======
+>>>>>>> 669b3011590e580813f476cbf650bbac1c8256a7
+>>>>>>> Stashed changes
     }
   ],
   "changed_ops": [
     {
       "op_id": 21,
+<<<<<<< HEAD
+      "old_start": 35.699999999091744,
+      "old_finish": 40.199999999091744,
+      "new_start": 35.699999999091744,
+=======
       "old_start": 39.3,
       "old_finish": 43.3,
       "new_start": 39.3,
+<<<<<<< Updated upstream
+=======
+>>>>>>> 669b3011590e580813f476cbf650bbac1c8256a7
+>>>>>>> Stashed changes
       "new_finish": 40.0
     },
     {
       "op_id": 26,
+<<<<<<< Updated upstream
+=======
+<<<<<<< HEAD
+      "old_start": 37.499999999090704,
+      "old_finish": 44.49999999909073,
+      "new_start": 37.499999999090704,
+      "new_finish": 40.0
+    },
+    {
+      "op_id": 27,
+      "old_start": 40.199999999091744,
+      "old_finish": 45.699999999091716,
+      "new_start": 44.699999998172004,
+      "new_finish": 50.199999998172004
+    },
+    {
+      "op_id": 30,
+      "old_start": 45.69999999817305,
+      "old_finish": 49.69999999817305,
+      "new_start": 50.19999999817011,
+      "new_finish": 56.69999999816875
+=======
+>>>>>>> Stashed changes
       "old_start": 39.5,
       "old_finish": 44.5,
       "new_start": 39.5,
@@ -395,6 +559,10 @@
       "old_finish": 49.7,
       "new_start": 41.8,
       "new_finish": 47.3
+<<<<<<< Updated upstream
+=======
+>>>>>>> 669b3011590e580813f476cbf650bbac1c8256a7
+>>>>>>> Stashed changes
     }
   ],
   "note": "Urgent-job reschedule.",
