@@ -1,5 +1,5 @@
 {
-  "t0": 38.42643699166666,
+  "t0": 40.0,
   "sets": {
     "I_done": [
       1,
@@ -25,22 +25,22 @@
       22,
       23,
       24,
+      25,
       28,
       29
     ],
     "I_run": [
-      25,
+      21,
+      26,
       27
     ],
     "I_free": [
-      21,
-      26,
       30
     ]
   },
   "objective": {
-    "T_max": 59.5,
-    "C_max": 99.0
+    "T_max": 20.2,
+    "C_max": 63.0
   },
   "urgent": {
     "job_id": 9,
@@ -48,13 +48,14 @@
       31,
       32
     ],
-    "C_final": 98.4264369916657,
-    "T": 59.5,
-    "d": 38.92643699166666
+    "C_final": 62.2,
+    "T": 20.2,
+    "d": 42.0
   },
   "keep_decisions": {
-    "25": 1,
-    "27": 0
+    "21": 0,
+    "26": 0,
+    "27": 1
   },
   "schedule": [
     {
@@ -241,10 +242,10 @@
       "op_id": 21,
       "op_label": "21",
       "job_id": 6,
-      "start": 46.8,
-      "finish": 50.8,
+      "start": 39.3,
+      "finish": 40.0,
       "machine": 1,
-      "station": 3
+      "station": 2
     },
     {
       "op_id": 22,
@@ -286,9 +287,9 @@
       "op_id": 26,
       "op_label": "26",
       "job_id": 7,
-      "start": 39.3,
-      "finish": 46.8,
-      "machine": 8,
+      "start": 39.5,
+      "finish": 40.0,
+      "machine": 3,
       "station": 3
     },
     {
@@ -296,7 +297,7 @@
       "op_label": "27",
       "job_id": 8,
       "start": 36.3,
-      "finish": 38.4264369916657,
+      "finish": 41.8,
       "machine": 2,
       "station": 5
     },
@@ -322,46 +323,55 @@
       "op_id": 30,
       "op_label": "30",
       "job_id": 8,
-      "start": 42.67356300833377,
-      "finish": 47.67356300833377,
-      "machine": 5,
-      "station": 1
+      "start": 41.8,
+      "finish": 47.3,
+      "machine": 6,
+      "station": 3
     },
     {
       "op_id": 31,
       "op_label": "31",
       "job_id": 9,
-      "start": 38.42643699166666,
-      "finish": 78.42643699166666,
+      "start": 40.0,
+      "finish": 60.2,
       "machine": 3,
-      "station": 6
+      "station": 4
     },
     {
       "op_id": 32,
       "op_label": "32",
       "job_id": 9,
-      "start": 38.426436991665696,
-      "finish": 98.4264369916657,
-      "machine": 2,
-      "station": 2
+      "start": 31.0,
+      "finish": 51.4,
+      "machine": 4,
+      "station": 1
     },
     {
       "op_id": 33,
-      "op_label": "25(cont)",
-      "job_id": 7,
-      "start": 39.3,
-      "finish": 39.3,
-      "machine": null,
-      "station": null
+      "op_label": "21(cont)",
+      "job_id": 6,
+      "start": 44.5,
+      "finish": 47.8,
+      "machine": 2,
+      "station": 9
     },
     {
       "op_id": 34,
+      "op_label": "26(cont)",
+      "job_id": 7,
+      "start": 40.0,
+      "finish": 44.5,
+      "machine": 9,
+      "station": 9
+    },
+    {
+      "op_id": 35,
       "op_label": "27(cont)",
       "job_id": 8,
-      "start": 39.3,
-      "finish": 42.67356300833377,
-      "machine": 1,
-      "station": 5
+      "start": 41.8,
+      "finish": 41.8,
+      "machine": null,
+      "station": null
     }
   ],
   "changed_ops": [
@@ -369,37 +379,34 @@
       "op_id": 21,
       "old_start": 39.3,
       "old_finish": 43.3,
-      "new_start": 46.8,
-      "new_finish": 50.8
+      "new_start": 39.3,
+      "new_finish": 40.0
     },
     {
       "op_id": 26,
       "old_start": 39.5,
       "old_finish": 44.5,
-      "new_start": 39.3,
-      "new_finish": 46.8
-    },
-    {
-      "op_id": 27,
-      "old_start": 36.3,
-      "old_finish": 41.8,
-      "new_start": 36.3,
-      "new_finish": 38.4264369916657
+      "new_start": 39.5,
+      "new_finish": 40.0
     },
     {
       "op_id": 30,
       "old_start": 42.2,
       "old_finish": 49.7,
-      "new_start": 42.67356300833377,
-      "new_finish": 47.67356300833377
+      "new_start": 41.8,
+      "new_finish": 47.3
     }
   ],
   "note": "Urgent-job reschedule.",
-  "scenario_name": "Scenario 04 — Urgent Job Shock (Tight Due Date)",
+  "scenario_name": "Scenario 05 — Combined Shock: Urgent Job + Machine & Station Outage",
   "mode": "optimize",
   "disruptions": {
-    "unavailable_machines": [],
-    "unavailable_stations": []
+    "unavailable_machines": [
+      1
+    ],
+    "unavailable_stations": [
+      2
+    ]
   },
   "applied_overrides_at_reschedule": {}
 }

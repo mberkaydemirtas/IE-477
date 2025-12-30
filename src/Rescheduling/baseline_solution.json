@@ -795,18 +795,7 @@
     "30,9": 0
   },
   "plan_calendar": {
-    "mode": "realtime_anchor",
-    "utc_offset": "+03:00",
-    "workdays": [
-      0,
-      1,
-      2,
-      3,
-      4
-    ],
-    "shift_start_local": "08:00",
-    "workday_hours": 8.0,
-    "lunch_break_included": false
+    "utc_offset": "+03:00"
   },
-  "scenario_name": "Scenario 04 — Urgent Job Shock (Tight Due Date)"
+  "scenario_name": "Scenario 05 — Combined Shock: Urgent Job + Machine & Station Outage"
 }
