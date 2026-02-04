@@ -2,30 +2,36 @@
 """
 HeuristicBaseModel.py
 
-Welding Shop Scheduling – Giffler–Thompson (GT) + ATC Heuristic (BASE)
+Welding Shop Scheduling – Giffler–Thompson (GT) + ATC Heuristic (BASE + RESCHED SUPPORT)
 
-DATA-AGNOSTIC: Provide a `data` dictionary (see scenarios) and call:
-    res = run_heuristic(data, k1=2.0)
+DATA-AGNOSTIC:
+    res = run_heuristic(
+        data,
+        k1=2.0,
+        fixed_ops=None,
+        start_time_floor=0.0,
+        unavailable_machines=None,
+        unavailable_stations=None,
+    )
 
-REPORT-ALIGNED CORE (kept as close as possible):
-- GT pivot selection: i* = argmin earliest completion among STARTABLE ops at time t
-- Conflict set: shares pivot's chosen machine OR station
-- ATC selection within conflict set
-- Tardiness: T_j = max(C_final_j - d_j, 0)
+RESCHED SUPPORT ADDED:
+- fixed_ops: pre-scheduled ops that must remain at given start/finish and block their resources until finish
+- start_time_floor: no non-fixed op can start before this (use t0)
+- unavailable resources: prevent new assignments to those machines/stations
+- ROBUST C_weld: max completion among job ops (safe for remainder/split ops)
 
-CRITICAL FIX (still GT-consistent, but enables parallelism):
-- "Batch scheduling at fixed t": while there exist operations that can START at time t,
-  schedule them one-by-one (GT pivot + ATC) WITHOUT advancing t.
-- Only when nothing can start at time t, advance t to the next event (min of machine/station availability
-  or next release/precedence-ready time).
+Still report-aligned:
+- GT pivot: among STARTABLE at time t, pick min earliest completion
+- Conflict: shares pivot machine OR station
+- ATC within conflict
+- Batch scheduling at fixed t (parallelism fix)
 
-This fixes the observed issue where machine 2 stays unused and makespan doubles
-because the heuristic behaves like a single-thread pipeline.
+Python 3.9 compatible (no `X | None` type syntax).
 """
 
 import math
 from dataclasses import dataclass
-from typing import Dict, List, Tuple, Any
+from typing import Dict, List, Tuple, Any, Optional
 
 
 # -------------------------------
@@ -36,7 +42,7 @@ def get_job_of_map(J: List[int], O_j: Dict[int, List[int]]) -> Dict[int, int]:
     job_of: Dict[int, int] = {}
     for j in J:
         for i in O_j[j]:
-            job_of[i] = j
+            job_of[int(i)] = int(j)
     return job_of
 
 
@@ -65,6 +71,7 @@ def verify_data_basic(data: Dict[str, Any]) -> None:
     all_ops = set()
     for j in J:
         for op in O_j[j]:
+            op = int(op)
             all_ops.add(op)
             if op not in I:
                 raise ValueError(f"Operation {op} in O_j[{j}] not in I")
@@ -111,19 +118,45 @@ class HeuristicResult:
 # GT + ATC heuristic (Report-aligned + parallel batching at fixed t)
 # -------------------------------
 
-def run_heuristic(data: Dict[str, Any], k1: float = 2.0, eps: float = 1e-9) -> HeuristicResult:
+def run_heuristic(
+    data: Dict[str, Any],
+    k1: float = 2.0,
+    eps: float = 1e-9,
+    fixed_ops: Optional[Dict[int, Dict[str, Any]]] = None,
+    start_time_floor: float = 0.0,
+    unavailable_machines: Optional[List[int]] = None,
+    unavailable_stations: Optional[List[int]] = None,
+) -> HeuristicResult:
     """
-    Report-aligned GT + ATC heuristic with a minimal but necessary fix:
-    fill all operations that can start at the current decision time t (batching),
-    then advance t to the next event.
+    GT + ATC heuristic with rescheduling support.
+
+    fixed_ops format (op_id -> dict):
+      {
+        "start": float,
+        "finish": float,
+        "machine": int or None,
+        "station": int or None
+      }
+
+    Rules:
+    - Fixed ops are taken as given and block their resources until finish.
+    - Non-fixed ops cannot start before start_time_floor (use t0).
+    - New assignments cannot use unavailable machines/stations.
     """
     verify_data_basic(data)
 
+    fixed_ops = fixed_ops or {}
+    unavailable_machines = unavailable_machines or []
+    unavailable_stations = unavailable_stations or []
+
+    badM = set(int(x) for x in unavailable_machines)
+    badL = set(int(x) for x in unavailable_stations)
+
     J = data["J"]
-    I = data["I"]
+    I = [int(x) for x in data["I"]]
     O_j = data["O_j"]
-    M = data["M"]
-    L = data["L"]
+    M = [int(x) for x in data["M"]]
+    L = [int(x) for x in data["L"]]
     M_i = data["M_i"]
     L_i = data["L_i"]
     Pred_i = data["Pred_i"]
@@ -135,13 +168,13 @@ def run_heuristic(data: Dict[str, Any], k1: float = 2.0, eps: float = 1e-9) -> H
     t_paint_j = data["t_paint_j"]
     p_im = data["p_im"]
     beta_i = data["beta_i"]
-    L_small = data["L_small"]
+    L_small = set(int(x) for x in data["L_small"])
 
     job_of = get_job_of_map(J, O_j)
 
     # Average processing time for ATC scaling
-    all_p = [float(p_im[(i, m)]) for i in I for m in M_i[i]]
-    p_bar = sum(all_p) / len(all_p) if all_p else 1.0
+    all_p = [float(p_im[(int(i), int(m))]) for i in I for m in M_i[i]]
+    p_bar = (sum(all_p) / len(all_p)) if all_p else 1.0
 
     # Resource availability times
     avail_machine: Dict[int, float] = {m: 0.0 for m in M}
@@ -154,35 +187,72 @@ def run_heuristic(data: Dict[str, Any], k1: float = 2.0, eps: float = 1e-9) -> H
     assign_station: Dict[int, int] = {}
 
     scheduled = set()
-    t = 0.0  # decision time
 
-    def atc_index(i: int, t_now: float, best_pair_local: Dict[int, Tuple[int, int]]) -> float:
-        j = job_of[i]
-        m_earliest, _ = best_pair_local[i]  # earliest assignment machine
-        p_i = float(p_im[(i, m_earliest)])
-        slack = max(float(d_j[j]) - p_i - t_now, 0.0)
-        denom = max(k1 * p_bar, eps)
-        return (1.0 / max(p_i, eps)) * math.exp(-slack / denom)
+    # ------------------------------------------------
+    # Load FIXED OPS
+    # ------------------------------------------------
+    for op_id, row in fixed_ops.items():
+        i = int(op_id)
+        if i not in I:
+            continue
+        s = float(row["start"])
+        c = float(row["finish"])
+        S[i] = s
+        C[i] = c
+        scheduled.add(i)
 
+        m = row.get("machine", None)
+        l = row.get("station", None)
+
+        if m is not None:
+            m = int(m)
+            assign_machine[i] = m
+            avail_machine[m] = max(avail_machine.get(m, 0.0), c)
+        if l is not None:
+            l = int(l)
+            assign_station[i] = l
+            avail_station[l] = max(avail_station.get(l, 0.0), c)
+
+    # decision time starts at floor (t0 for reschedule)
+    t = float(start_time_floor)
 
     def ready_time(i: int) -> float:
         """R_i = max(release(job), completion(predecessors))."""
         j = job_of[i]
         rt = float(r_j[j])
-        if Pred_i[i]:
-            rt = max(rt, max(C[h] for h in Pred_i[i]))
+
+        preds = Pred_i.get(i, [])
+        if preds:
+            rt = max(rt, max(C[int(h)] for h in preds))
+
+        # enforce floor for non-fixed ops
+        rt = max(rt, float(start_time_floor))
         return rt
 
+    def atc_index(i: int, t_now: float, best_pair_local: Dict[int, Tuple[int, int]]) -> float:
+        j = job_of[i]
+        m_earliest, _ = best_pair_local[i]
+        p_i = float(p_im[(int(i), int(m_earliest))])
+        slack = max(float(d_j[j]) - p_i - t_now, 0.0)
+        denom = max(k1 * p_bar, eps)
+        return (1.0 / max(p_i, eps)) * math.exp(-slack / denom)
+
+    def preds_done(i: int) -> bool:
+        return all(int(h) in C for h in Pred_i.get(i, []))
+
+    # ------------------------------------------------
+    # Main loop
+    # ------------------------------------------------
     while len(scheduled) < len(I):
 
-        # ---- Build eligible candidates + their ready times
+        # Build eligible candidates (precedence-feasible) that are not fixed/scheduled
         candidates: List[int] = []
         R_i: Dict[int, float] = {}
 
         for i in I:
             if i in scheduled:
                 continue
-            if any(h not in scheduled for h in Pred_i[i]):
+            if not preds_done(i):
                 continue
             R_i[i] = ready_time(i)
             candidates.append(i)
@@ -190,15 +260,14 @@ def run_heuristic(data: Dict[str, Any], k1: float = 2.0, eps: float = 1e-9) -> H
         if not candidates:
             raise RuntimeError("No eligible candidates (precedence cycle or inconsistent data).")
 
-        # ---- If nothing is released by time t, move t to earliest ready time (report-aligned jump)
+        # If none released by current t, jump t to min ready time
         if all(R_i[i] > t + eps for i in candidates):
             t = min(R_i[i] for i in candidates)
 
         # ==========================================================
-        # BATCH SCHEDULING AT FIXED t (parallelism fix)
+        # Batch scheduling at fixed t
         # ==========================================================
         while True:
-            # Ready at current t
             ready = [i for i in candidates if R_i[i] <= t + eps]
             if not ready:
                 break
@@ -207,25 +276,32 @@ def run_heuristic(data: Dict[str, Any], k1: float = 2.0, eps: float = 1e-9) -> H
             earliest_start: Dict[int, float] = {}
             earliest_completion: Dict[int, float] = {}
 
-            # For each ready op, compute best (m,l) under current availabilities
             for i in ready:
                 bestS = float("inf")
                 bestC = float("inf")
-                bestML: Tuple[int, int] | None = None
+                bestML = None  # type: Optional[Tuple[int, int]]
 
-                machines_sorted = sorted(M_i[i], key=lambda mm: (avail_machine[mm], mm))
-                stations_sorted = sorted(L_i[i], key=lambda ll: (avail_station[ll], ll))
+                machines_sorted = sorted(
+                    [int(mm) for mm in M_i[i] if int(mm) not in badM],
+                    key=lambda mm: (avail_machine.get(mm, 0.0), mm)
+                )
+                stations_sorted = sorted(
+                    [int(ll) for ll in L_i[i] if int(ll) not in badL],
+                    key=lambda ll: (avail_station.get(ll, 0.0), ll)
+                )
+
+                if not machines_sorted or not stations_sorted:
+                    continue
 
                 for m in machines_sorted:
                     for l in stations_sorted:
-                        if beta_i[i] == 1 and l in L_small:
+                        if int(beta_i.get(i, 0)) == 1 and l in L_small:
                             continue
 
                         s = max(t, R_i[i], avail_machine[m], avail_station[l])
-                        c = s + float(p_im[(i, m)])
+                        c = s + float(p_im[(int(i), int(m))])
 
-                        # Primary: minimize start time (so we can fill resources at t)
-                        # Secondary: minimize completion, then deterministic tie-break on ids
+                        # Primary: minimize start time; Secondary: minimize completion
                         if (s < bestS - 1e-12) or (
                             abs(s - bestS) <= 1e-12 and (c < bestC - 1e-12)
                         ) or (
@@ -242,16 +318,16 @@ def run_heuristic(data: Dict[str, Any], k1: float = 2.0, eps: float = 1e-9) -> H
                 earliest_start[i] = bestS
                 earliest_completion[i] = bestC
 
-            # Startable now: earliest start is exactly t
+            # startable now: earliest start == t
             startable = [i for i in ready if i in earliest_start and abs(earliest_start[i] - t) <= eps]
             if not startable:
                 break
 
-            # Pivot i* among STARTABLE: min earliest completion (GT pivot)
+            # GT pivot among STARTABLE: min earliest completion
             i_star = min(startable, key=lambda ii: earliest_completion[ii])
             m_star, l_star = best_pair[i_star]
 
-            # Conflict set among STARTABLE: shares pivot machine OR station
+            # conflict set among STARTABLE: shares pivot machine OR station
             conflict_set = [i_star]
             for i in startable:
                 if i == i_star:
@@ -260,42 +336,37 @@ def run_heuristic(data: Dict[str, Any], k1: float = 2.0, eps: float = 1e-9) -> H
                 if (mi == m_star) or (li == l_star):
                     conflict_set.append(i)
 
-            # Choose within conflict set by ATC
             chosen = max(conflict_set, key=lambda ii: atc_index(ii, t, best_pair))
-
-
             m_chosen, l_chosen = best_pair[chosen]
 
-            # By construction, chosen is startable => start == t
+            # start = t (by construction)
             start = t
-            comp = start + float(p_im[(chosen, m_chosen)])
+            comp = start + float(p_im[(int(chosen), int(m_chosen))])
 
-            # Commit decision
-            S[chosen] = start
-            C[chosen] = comp
-            assign_machine[chosen] = m_chosen
-            assign_station[chosen] = l_chosen
+            S[chosen] = float(start)
+            C[chosen] = float(comp)
+            assign_machine[chosen] = int(m_chosen)
+            assign_station[chosen] = int(l_chosen)
 
-            avail_machine[m_chosen] = comp
-            avail_station[l_chosen] = comp
+            avail_machine[int(m_chosen)] = float(comp)
+            avail_station[int(l_chosen)] = float(comp)
+
             scheduled.add(chosen)
-
-            # Remove from candidate pool and continue batching at SAME t
             candidates.remove(chosen)
+
             if not candidates:
                 break
 
-            # Update ready times for newly eligible ops (if any became eligible at same t)
+            # refresh R_i for remaining candidates
             for i2 in candidates:
                 R_i[i2] = ready_time(i2)
 
         # ==========================================================
-        # Advance t to next event ONLY when no more startable at t
+        # Advance t to next event (when nothing can start at t)
         # ==========================================================
         if len(scheduled) < len(I):
             next_t = float("inf")
 
-            # next machine/station completion strictly after t
             for tt in avail_machine.values():
                 if tt > t + eps:
                     next_t = min(next_t, tt)
@@ -303,18 +374,13 @@ def run_heuristic(data: Dict[str, Any], k1: float = 2.0, eps: float = 1e-9) -> H
                 if tt > t + eps:
                     next_t = min(next_t, tt)
 
-            remaining_candidates = []
-            R_rem: List[float] = []
+            # next ready time among precedence-feasible but not yet released
             for i in I:
                 if i in scheduled:
                     continue
-                if any(h not in scheduled for h in Pred_i[i]):
+                if not preds_done(i):
                     continue
                 rt = ready_time(i)
-                remaining_candidates.append(i)
-                R_rem.append(rt)
-
-            for rt in R_rem:
                 if rt > t + eps:
                     next_t = min(next_t, rt)
 
@@ -323,23 +389,29 @@ def run_heuristic(data: Dict[str, Any], k1: float = 2.0, eps: float = 1e-9) -> H
 
             t = next_t
 
-    # ---- Job metrics
+    # ------------------------------------------------
+    # Job metrics (ROBUST: C_weld = max over job ops)
+    # ------------------------------------------------
     C_weld: Dict[int, float] = {}
     C_final: Dict[int, float] = {}
     T: Dict[int, float] = {}
 
     for j in J:
-        last_op = O_j[j][-1]
-        C_weld[j] = C[last_op]
-        C_final[j] = (
-            C_weld[j]
-            + float(g_j[j]) * float(t_grind_j[j])
-            + float(p_flag_j[j]) * float(t_paint_j[j])
-        )
-        T[j] = max(C_final[j] - float(d_j[j]), 0.0)
+        cwj = 0.0
+        for op in O_j[j]:
+            cwj = max(cwj, float(C[int(op)]))
+        C_weld[int(j)] = float(cwj)
 
-    C_max = max(C_final.values())
-    T_max = max(T.values())
+        cf = (
+            float(cwj)
+            + float(g_j[int(j)]) * float(t_grind_j[int(j)])
+            + float(p_flag_j[int(j)]) * float(t_paint_j[int(j)])
+        )
+        C_final[int(j)] = float(cf)
+        T[int(j)] = max(float(cf) - float(d_j[int(j)]), 0.0)
+
+    C_max = max(C_final.values()) if C_final else 0.0
+    T_max = max(T.values()) if T else 0.0
 
     return HeuristicResult(
         S=S, C=C,
@@ -348,8 +420,8 @@ def run_heuristic(data: Dict[str, Any], k1: float = 2.0, eps: float = 1e-9) -> H
         C_weld=C_weld,
         C_final=C_final,
         T=T,
-        T_max=T_max,
-        C_max=C_max
+        T_max=float(T_max),
+        C_max=float(C_max)
     )
 
 
@@ -359,14 +431,14 @@ def run_heuristic(data: Dict[str, Any], k1: float = 2.0, eps: float = 1e-9) -> H
 
 def check_heuristic_solution(data: Dict[str, Any], res: HeuristicResult, tol: float = 1e-6) -> None:
     J = data["J"]
-    I = data["I"]
+    I = [int(x) for x in data["I"]]
     O_j = data["O_j"]
     M = data["M"]
     L = data["L"]
     Pred_i = data["Pred_i"]
     r_j = data["r_j"]
     beta_i = data["beta_i"]
-    L_small = data["L_small"]
+    L_small = set(int(x) for x in data["L_small"])
 
     S, C = res.S, res.C
     am, al = res.assign_machine, res.assign_station
@@ -374,10 +446,10 @@ def check_heuristic_solution(data: Dict[str, Any], res: HeuristicResult, tol: fl
 
     # precedence
     for i in I:
-        for h in Pred_i[i]:
-            if S[i] + tol < C[h]:
+        for h in Pred_i.get(i, []):
+            if S[i] + tol < C[int(h)]:
                 raise AssertionError(
-                    f"Precedence violated: op {i} starts {S[i]:.3f} < C[{h}]={C[h]:.3f}"
+                    f"Precedence violated: op {i} starts {S[i]:.3f} < C[{h}]={C[int(h)]:.3f}"
                 )
 
     # release
@@ -408,7 +480,7 @@ def check_heuristic_solution(data: Dict[str, Any], res: HeuristicResult, tol: fl
 
     # big-station constraint
     for i in I:
-        if beta_i[i] == 1 and al[i] in L_small:
+        if int(beta_i.get(i, 0)) == 1 and al[i] in L_small:
             raise AssertionError(
                 f"Big-station violated: op {i} assigned to small station {al[i]}"
             )
