@@ -286,9 +286,7 @@ def run_heuristic(data: Dict[str, Any], k1: float = 2.0, eps: float = 1e-9) -> H
                 break
 
             # Update ready times for newly eligible ops (if any became eligible at same t)
-            # (Predecessor completion is at >= t, so new ops may become ready only at >t, but safe to refresh.)
             for i2 in candidates:
-                # still eligible by precedence (they are in candidates), just refresh R_i in case of multiple preds
                 R_i[i2] = ready_time(i2)
 
         # ==========================================================
@@ -305,8 +303,6 @@ def run_heuristic(data: Dict[str, Any], k1: float = 2.0, eps: float = 1e-9) -> H
                 if tt > t + eps:
                     next_t = min(next_t, tt)
 
-            # next ready/release among remaining eligible candidates
-            # (we must recompute candidates here because batching may have emptied candidates)
             remaining_candidates = []
             R_rem: List[float] = []
             for i in I:

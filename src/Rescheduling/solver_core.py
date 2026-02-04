@@ -1,24 +1,46 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 
-from gurobipy import Model, GRB, quicksum
-from datetime import datetime, timezone, timedelta, time as dtime
+"""
+solver_core.py (OPEN-SOURCE ONLY)
+
+- Baseline artık HeuristicBaseModel.py'den alınacak (run_heuristic).
+- Bu dosya: rescheduling (urgent job + disruption) için heuristic üretir.
+- Gurobi / MIP yok.
+
+Reschedule mantığı:
+- t0 = plan_start'tan şimdiye kadar geçen "working hour" zamanı
+- I_done: C_old <= t0
+- I_run : S_old < t0 < C_old
+- I_free: S_old >= t0
+
+"Tercih 1 / continue" mantığı:
+- Running op normalde devam eder (kesilmez)
+- AMA eğer running op'un machine veya station'ı unavailable ise => t0’da kes (preempt)
+  ve remainder op schedule edilir.
+
+Heuristic: GT pivot + ATC (batch scheduling at fixed t) — baseline ile aynı ruh.
+
+✅ Bu sürümde kritik düzeltmeler:
+1) Scenario JSON'daki `data` normalize edilir:
+   - O_j/M_i/L_i/Pred_i key'leri int olur
+   - p_im JSON-safe string/nested formatlardan (i,m) tuple dict'e çevrilir
+2) Running op remainder için beta_i korunur (big station kısıtı kaybolmaz)
+3) Fixed ops için machine/station None gelirse schedule/x_old fallback + en son feasible fallback yapılır
+"""
+
 import math
-from typing import Dict, List, Tuple, Optional
+from datetime import datetime, timezone, timedelta, time as dtime
+from typing import Any, Dict, List, Tuple, Optional
 
 
 # ==========================================================
 #  TIME HELPERS (working-hours based t0, NO tzdata dependency)
 # ==========================================================
 
-def now_iso_utc() -> str:
-    return datetime.now(timezone.utc).isoformat()
-
-
 def _parse_hhmm(hhmm: str):
     hh, mm = hhmm.strip().split(":")
     return int(hh), int(mm)
-
 
 def _parse_utc_offset(s: str) -> timezone:
     s = (s or "+00:00").strip()
@@ -31,7 +53,6 @@ def _parse_utc_offset(s: str) -> timezone:
     hh, mm = s.split(":")
     delta = timedelta(hours=sign * int(hh), minutes=sign * int(mm))
     return timezone(delta)
-
 
 def compute_t0_from_plan_start(plan_start_iso: str, plan_calendar: dict | None = None) -> float:
     """
@@ -78,7 +99,6 @@ def compute_t0_from_plan_start(plan_start_iso: str, plan_calendar: dict | None =
     d = start_local.date()
     today = now_local.date()
 
-    # days before today
     while d < today:
         if d.weekday() in workdays:
             s, e = shift_window_for_date(d)
@@ -93,7 +113,6 @@ def compute_t0_from_plan_start(plan_start_iso: str, plan_calendar: dict | None =
                 total += (right - left).total_seconds() / 3600.0
         d = d + timedelta(days=1)
 
-    # today partial
     if today.weekday() in workdays:
         s, e = shift_window_for_date(today)
 
@@ -115,7 +134,6 @@ def compute_t0_from_plan_start(plan_start_iso: str, plan_calendar: dict | None =
 def _tuplekey_to_str(i: int, k: int) -> str:
     return f"{int(i)},{int(k)}"
 
-
 def _str_to_tuplekey(s: str):
     s = s.strip().replace("(", "").replace(")", "")
     a, b = [x.strip() for x in s.split(",")]
@@ -123,18 +141,150 @@ def _str_to_tuplekey(s: str):
 
 
 # ==========================================================
-#  SOLUTION EXTRACTION HELPERS
+#  DATA NORMALIZATION (CRITICAL FOR SCENARIO JSON)
 # ==========================================================
 
-def extract_old_solution(I, x, y, S, C):
-    S_old = {int(i): float(S[i].X) for i in I}
-    C_old = {int(i): float(C[i].X) for i in I}
+def _to_int_list(xs) -> List[int]:
+    return [int(x) for x in (xs or [])]
 
-    x_old = {_tuplekey_to_str(i, m): int(round(x[i, m].X)) for (i, m) in x.keys()}
-    y_old = {_tuplekey_to_str(i, l): int(round(y[i, l].X)) for (i, l) in y.keys()}
+def _dict_int_keys(d: dict) -> dict:
+    out = {}
+    for k, v in (d or {}).items():
+        try:
+            ik = int(k)
+        except Exception:
+            ik = k
+        out[ik] = v
+    return out
 
-    return S_old, C_old, x_old, y_old
+def _dict_int_keys_list_int_vals(d: dict) -> Dict[int, List[int]]:
+    out: Dict[int, List[int]] = {}
+    for k, v in (d or {}).items():
+        out[int(k)] = [int(x) for x in (v or [])]
+    return out
 
+def _dict_int_keys_float_vals(d: dict) -> Dict[int, float]:
+    out: Dict[int, float] = {}
+    for k, v in (d or {}).items():
+        out[int(k)] = float(v)
+    return out
+
+def _dict_int_keys_int_vals(d: dict) -> Dict[int, int]:
+    out: Dict[int, int] = {}
+    for k, v in (d or {}).items():
+        out[int(k)] = int(v)
+    return out
+
+def _normalize_p_im(p_im_raw: Any) -> Dict[Tuple[int, int], float]:
+    """
+    Supports common JSON formats:
+    A) {"1,2": 3.5, "1,3": 4.0}
+    B) {"1": {"2": 3.5, "3": 4.0}}
+    C) {(1,2): 3.5}  (already tuple keys - Python dict from code)
+    """
+    if p_im_raw is None:
+        return {}
+
+    out: Dict[Tuple[int, int], float] = {}
+
+    # already tuple keyed
+    if isinstance(p_im_raw, dict):
+        sample_key = next(iter(p_im_raw.keys()), None)
+
+        # Case C: tuple keys
+        if isinstance(sample_key, tuple) and len(sample_key) == 2:
+            for (i, m), v in p_im_raw.items():
+                out[(int(i), int(m))] = float(v)
+            return out
+
+        # Case A: "i,m" keys
+        if isinstance(sample_key, str) and ("," in sample_key):
+            for k, v in p_im_raw.items():
+                i, m = _str_to_tuplekey(str(k))
+                out[(int(i), int(m))] = float(v)
+            return out
+
+        # Case B: nested dict: {"i": {"m": p}}
+        if isinstance(sample_key, (str, int)) and isinstance(p_im_raw.get(sample_key), dict):
+            for i_key, inner in p_im_raw.items():
+                i = int(i_key)
+                for m_key, v in inner.items():
+                    m = int(m_key)
+                    out[(i, m)] = float(v)
+            return out
+
+        # fallback: try parse each key
+        for k, v in p_im_raw.items():
+            if isinstance(k, str) and "," in k:
+                i, m = _str_to_tuplekey(k)
+                out[(int(i), int(m))] = float(v)
+    return out
+
+def normalize_data(data: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Makes scenario `data` safe for tuple indexing and int-key access.
+    """
+    if not isinstance(data, dict):
+        raise ValueError("data must be a dict")
+
+    out = dict(data)
+
+    # Lists
+    out["J"] = _to_int_list(out.get("J"))
+    out["I"] = _to_int_list(out.get("I"))
+    out["M"] = _to_int_list(out.get("M"))
+    out["L"] = _to_int_list(out.get("L"))
+
+    # Dicts with int keys
+    out["O_j"] = _dict_int_keys_list_int_vals(out.get("O_j", {}))
+    out["M_i"] = _dict_int_keys_list_int_vals(out.get("M_i", {}))
+    out["L_i"] = _dict_int_keys_list_int_vals(out.get("L_i", {}))
+    out["Pred_i"] = _dict_int_keys_list_int_vals(out.get("Pred_i", {}))
+
+    out["r_j"] = _dict_int_keys_float_vals(out.get("r_j", {}))
+    out["d_j"] = _dict_int_keys_float_vals(out.get("d_j", {}))
+    out["g_j"] = _dict_int_keys_int_vals(out.get("g_j", {}))
+
+    # paint flag: accept p_flag_j OR p_j; if none => zeros
+    pflag = out.get("p_flag_j", None)
+    if pflag is None:
+        pflag = out.get("p_j", {})
+    out["p_flag_j"] = _dict_int_keys_int_vals(pflag or {})
+
+    out["t_grind_j"] = _dict_int_keys_float_vals(out.get("t_grind_j", {}))
+    out["t_paint_j"] = _dict_int_keys_float_vals(out.get("t_paint_j", {}))
+    out["beta_i"] = _dict_int_keys_int_vals(out.get("beta_i", {}))
+
+    # station sets
+    out["L_small"] = _to_int_list(out.get("L_small", []))
+    if "L_big" in out:
+        out["L_big"] = _to_int_list(out.get("L_big", []))
+
+    # p_im
+    out["p_im"] = _normalize_p_im(out.get("p_im"))
+
+    # Safety: if p_flag_j missing some jobs, fill zeros
+    for j in out["J"]:
+        if j not in out["p_flag_j"]:
+            out["p_flag_j"][j] = 0
+        if j not in out["g_j"]:
+            out["g_j"][j] = 0
+        if j not in out["r_j"]:
+            out["r_j"][j] = 0.0
+        if j not in out["d_j"]:
+            # if due missing, put a big due (avoid crash)
+            out["d_j"][j] = 1e9
+        if j not in out["t_grind_j"]:
+            out["t_grind_j"][j] = 0.0
+        if j not in out["t_paint_j"]:
+            out["t_paint_j"][j] = 0.0
+
+    return out
+
+
+# ==========================================================
+#  OLD SOLUTION NORMALIZATION (BASELINE JSON)
+# ==========================================================
 
 def normalize_old_solution(old_solution: dict) -> dict:
     out = dict(old_solution)
@@ -157,12 +307,15 @@ def normalize_old_solution(old_solution: dict) -> dict:
     return out
 
 
+# ==========================================================
+#  SET CLASSIFICATION
+# ==========================================================
+
 def classify_ops_by_t0(I, S_old, C_old, t0):
     done = [int(i) for i in I if C_old[int(i)] <= t0 + 1e-9]
     run  = [int(i) for i in I if (S_old[int(i)] < t0 - 1e-9) and (C_old[int(i)] > t0 + 1e-9)]
     free = [int(i) for i in I if S_old[int(i)] >= t0 - 1e-9]
     return done, run, free
-
 
 def op_to_job_map(O_j):
     mp = {}
@@ -172,398 +325,8 @@ def op_to_job_map(O_j):
     return mp
 
 
-def extract_assignment_for_ops(I, M_i, L_i, x, y):
-    chosen_m = {}
-    chosen_l = {}
-
-    for i in I:
-        i = int(i)
-
-        mm = None
-        for m in M_i[i]:
-            if (i, m) in x and x[i, m].X > 0.5:
-                mm = int(m)
-                break
-
-        ll = None
-        for l in L_i[i]:
-            if (i, l) in y and y[i, l].X > 0.5:
-                ll = int(l)
-                break
-
-        chosen_m[i] = mm
-        chosen_l[i] = ll
-
-    return chosen_m, chosen_l
-
-
 # ==========================================================
-#  HEURISTIC (ATCS list scheduling)
-# ==========================================================
-
-def _avg_min_p(I: List[int], M_i: Dict[int, List[int]], p_im: Dict[Tuple[int, int], float]) -> float:
-    vals = []
-    for i in I:
-        mi = M_i.get(i, [])
-        if not mi:
-            continue
-        vals.append(min(p_im[(i, m)] for m in mi))
-    return float(sum(vals) / max(1, len(vals)))
-
-
-def _atcs_priority(i: int, t: float, job_of: Dict[int, int],
-                   d_j: Dict[int, float],
-                   M_i: Dict[int, List[int]],
-                   p_im: Dict[Tuple[int, int], float],
-                   pbar: float,
-                   k1: float = 2.0) -> float:
-    """
-    ATCS(i,t) = 1/pi * exp( - max{ d_job(i) - pi - t, 0 } / (k1 * pbar) )
-    pi = min_m p_im
-    """
-    mi = M_i[i]
-    pi = min(p_im[(i, m)] for m in mi)
-    j = job_of[i]
-    slack = max(d_j[j] - pi - t, 0.0)
-    return (1.0 / max(1e-9, pi)) * math.exp(-slack / max(1e-9, (k1 * pbar)))
-
-
-def heuristic_schedule(
-    data: dict,
-    fixed_ops: Optional[Dict[int, dict]] = None,
-    start_time_floor: float = 0.0,
-    k1: float = 2.0,
-    unavailable_machines: Optional[List[int]] = None,
-    unavailable_stations: Optional[List[int]] = None,
-) -> Tuple[List[dict], dict]:
-    """
-    Produces a feasible schedule (no-overlap on machines/stations) by list scheduling.
-
-    fixed_ops: {op_id: {"start","finish","machine","station","job_id","op_label"}}
-              Fixed ops block their machine/station until finish time.
-
-    start_time_floor: all non-fixed ops start >= this.
-
-    unavailable_machines/stations:
-      - Heuristic will NEVER assign new operations to these resources (t0 sonrası).
-
-    Returns:
-      (schedule_rows, objectives)
-      objectives = {"T_max","C_max","C_final":{j:...},"T":{j:...}}
-    """
-    fixed_ops = fixed_ops or {}
-    badM = set(int(x) for x in (unavailable_machines or []))
-    badL = set(int(x) for x in (unavailable_stations or []))
-
-    J = list(data["J"])
-    I = [int(x) for x in data["I"]]
-    O_j = data["O_j"]
-    M_i = data["M_i"]
-    L_i = data["L_i"]
-    Pred_i = data["Pred_i"]
-    p_im = data["p_im"]
-    r_j = data["r_j"]
-    d_j = data["d_j"]
-    g_j = data["g_j"]
-    p_j = data["p_j"]
-    t_grind_j = data["t_grind_j"]
-    t_paint_j = data["t_paint_j"]
-    beta_i = data["beta_i"]
-    L_big = set(data.get("L_big", []))
-    L_small = set(data.get("L_small", []))
-
-    job_of = op_to_job_map(O_j)
-
-    mach_av = {}   # m -> time
-    stat_av = {}   # l -> time
-
-    S = {}
-    C = {}
-    chosen_m = {}
-    chosen_l = {}
-
-    schedule = []
-    for op_id, row in fixed_ops.items():
-        i = int(op_id)
-        S[i] = float(row["start"])
-        C[i] = float(row["finish"])
-        chosen_m[i] = row.get("machine")
-        chosen_l[i] = row.get("station")
-
-        m = chosen_m[i]
-        l = chosen_l[i]
-        if m is not None:
-            mach_av[int(m)] = max(mach_av.get(int(m), 0.0), C[i])
-        if l is not None:
-            stat_av[int(l)] = max(stat_av.get(int(l), 0.0), C[i])
-
-        schedule.append({
-            "op_id": i,
-            "op_label": str(row.get("op_label", row.get("op_id", i))),
-            "job_id": int(row.get("job_id", job_of.get(i, -1))),
-            "start": float(S[i]),
-            "finish": float(C[i]),
-            "machine": (int(m) if m is not None else None),
-            "station": (int(l) if l is not None else None),
-        })
-
-    def preds_done_time(i: int) -> float:
-        preds = Pred_i.get(i, [])
-        if not preds:
-            return 0.0
-        return max(C.get(int(h), 0.0) for h in preds)
-
-    remaining = set(I) - set(int(x) for x in fixed_ops.keys())
-    pbar = _avg_min_p(I, M_i, p_im)
-
-    while remaining:
-        eligible = []
-        for i in list(remaining):
-            j = job_of.get(i, None)
-            if j is None:
-                continue
-
-            preds = Pred_i.get(i, [])
-            if any(int(h) not in C for h in preds):
-                continue
-
-            ready = preds_done_time(i)
-            ready = max(ready, float(start_time_floor))
-
-            if i == O_j[j][0]:
-                ready = max(ready, float(r_j[j]))
-
-            eligible.append((i, ready))
-
-        if not eligible:
-            raise RuntimeError("Heuristic deadlock: no eligible operations. Check precedence (cycle?)")
-
-        best_i = None
-        best_score = -1e100
-        best_ready = None
-        for (i, ready) in eligible:
-            score = _atcs_priority(
-                i=i, t=ready,
-                job_of=job_of, d_j=d_j, M_i=M_i, p_im=p_im, pbar=pbar, k1=k1
-            )
-            if score > best_score:
-                best_score = score
-                best_i = i
-                best_ready = ready
-
-        i = int(best_i)
-        ready = float(best_ready)
-
-        feasible_stations = list(L_i[i])
-
-        if beta_i.get(i, 0) == 1:
-            feasible_stations = [l for l in feasible_stations if int(l) in L_big]
-
-        feasible_stations = [int(l) for l in feasible_stations if int(l) not in badL]
-        if not feasible_stations:
-            raise RuntimeError(f"Heuristic: op {i} has no feasible station after filtering (big/closed).")
-
-        best = None  # (finish, start, m, l)
-        for m in M_i[i]:
-            m = int(m)
-            if m in badM:
-                continue
-
-            p = float(p_im[(i, m)])
-            m_ready = mach_av.get(m, 0.0)
-
-            for l in feasible_stations:
-                l = int(l)
-                l_ready = stat_av.get(l, 0.0)
-
-                s = max(ready, m_ready, l_ready)
-                f = s + p
-
-                cand = (f, s, m, l)
-                if best is None or cand < best:
-                    best = cand
-
-        if best is None:
-            raise RuntimeError(f"Heuristic: no feasible (machine,station) for op {i} after filtering.")
-
-        f, s, m, l = best
-
-        S[i] = float(s)
-        C[i] = float(f)
-        chosen_m[i] = int(m)
-        chosen_l[i] = int(l)
-        mach_av[m] = float(f)
-        stat_av[l] = float(f)
-
-        schedule.append({
-            "op_id": int(i),
-            "op_label": str(int(i)),
-            "job_id": int(job_of.get(i, -1)),
-            "start": float(s),
-            "finish": float(f),
-            "machine": int(m),
-            "station": int(l),
-        })
-
-        remaining.remove(i)
-
-    C_weld = {int(j): 0.0 for j in J}
-    for j in J:
-        for op in O_j[j]:
-            C_weld[j] = max(C_weld[j], C[int(op)])
-
-    C_final = {}
-    T = {}
-    for j in J:
-        C_final[j] = float(C_weld[j] + g_j[j] * t_grind_j[j] + p_j[j] * t_paint_j[j])
-        T[j] = max(0.0, C_final[j] - float(d_j[j]))
-
-    Tmax = max(T.values()) if T else 0.0
-    Cmax = max(C_final.values()) if C_final else 0.0
-
-    schedule.sort(key=lambda r: (float(r["start"]), float(r["finish"]), int(r["op_id"])))
-
-    objectives = {
-        "T_max": float(Tmax),
-        "C_max": float(Cmax),
-        "C_final": {int(j): float(C_final[j]) for j in C_final},
-        "T": {int(j): float(T[j]) for j in T},
-    }
-    return schedule, objectives
-
-
-# ==========================================================
-#  DATA BUILD
-# ==========================================================
-
-def make_base_data(overrides: dict | None = None):
-    overrides = overrides or {}
-
-    J = [1, 2, 3, 4, 5, 6, 7, 8]
-    I = list(range(1, 31))
-
-    O_j = {
-        1: [1, 2, 3],
-        2: [4, 5, 6, 7],
-        3: [8, 9, 10, 11, 12],
-        4: [13, 14],
-        5: [15, 16, 17, 18],
-        6: [19, 20, 21],
-        7: [22, 23, 24, 25, 26],
-        8: [27, 28, 29, 30],
-    }
-
-    M = list(range(1, 13))
-
-    machine_type = {m: 2 for m in M}
-    machine_type[1] = 1
-    machine_type[2] = 1
-
-    K_i = {i: ([1] if (i % 2 == 1) else [2]) for i in I}
-    M_i = {i: [m for m in M if machine_type[m] in K_i[i]] for i in I}
-
-    L = list(range(1, 10))
-    L_i = {i: L[:] for i in I}
-    L_big = [1, 2, 3]
-    L_small = [4, 5, 6, 7, 8, 9]
-
-    Pred_i = {i: [] for i in I}
-    Pred_i[2]  = [1]
-    Pred_i[3]  = [1]
-    Pred_i[5]  = [4]
-    Pred_i[6]  = [4]
-    Pred_i[7]  = [5]
-    Pred_i[9]  = [8]
-    Pred_i[10] = [8]
-    Pred_i[11] = [9, 10]
-    Pred_i[12] = [11]
-    Pred_i[14] = [13]
-    Pred_i[16] = [15]
-    Pred_i[17] = [15]
-    Pred_i[18] = [16]
-    Pred_i[21] = [19, 20]
-    Pred_i[23] = [22]
-    Pred_i[24] = [22]
-    Pred_i[25] = [23]
-    Pred_i[26] = [24]
-
-    for j in J:
-        ops = O_j[j]
-        last = ops[-1]
-        preds = set(Pred_i[last])
-        for op in ops:
-            if op != last:
-                preds.add(op)
-        Pred_i[last] = list(preds)
-
-    p_im = {}
-    for i in I:
-        for m in M_i[i]:
-            base = 3 + (i % 5)
-            machine_add = (m - 1) * 0.5
-            p_im[(i, m)] = float(base + machine_add)
-
-    if (1, 1) in p_im:
-        p_im[(1, 1)] = 6.0
-
-    release_times = [0.0, 2.0, 4.0, 6.0, 8.0, 10.0, 12.0, 14.0]
-    r_j = {j: release_times[idx] for idx, j in enumerate(J)}
-
-    base_slack = 18.0
-    slope = 1.2
-    d_j = {j: float(r_j[j] + base_slack + slope * j) for j in J}
-
-    g_j = {j: (1 if idx % 2 == 0 else 0) for idx, j in enumerate(J)}
-    p_j = {j: (1 if idx in [0, 1, 2] else 0) for idx, j in enumerate(J)}
-
-    t_grind_j = {}
-    t_paint_j = {}
-    for j in J:
-        last_op = O_j[j][-1]
-        t_grind_j[j] = 2.0 + (last_op % 2)
-        t_paint_j[j] = 3.0 if p_j[j] == 1 else 0.0
-
-    Iend = [O_j[j][-1] for j in J]
-    beta_i = {i: (1 if i in Iend else 0) for i in I}
-
-    data = {
-        "J": J, "I": I, "O_j": O_j,
-        "M": M, "L": L,
-        "machine_type": machine_type,
-        "K_i": K_i,
-        "M_i": M_i,
-        "L_i": L_i,
-        "L_big": L_big, "L_small": L_small,
-        "Pred_i": Pred_i,
-        "p_im": p_im,
-        "r_j": r_j, "d_j": d_j,
-        "g_j": g_j, "p_j": p_j,
-        "t_grind_j": t_grind_j, "t_paint_j": t_paint_j,
-        "beta_i": beta_i,
-        "M_proc": 1000.0, "M_seq": 1000.0, "M_Lseq": 1000.0
-    }
-
-    for key, val in overrides.items():
-        if key not in data:
-            raise ValueError(f"Unknown override key in scenario: {key}")
-
-        if isinstance(data[key], dict) and isinstance(val, dict):
-            new_map = dict(data[key])
-            for kk, vv in val.items():
-                try:
-                    ik = int(kk)
-                except Exception:
-                    ik = kk
-                new_map[ik] = vv
-            data[key] = new_map
-        else:
-            data[key] = val
-
-    return data
-
-
-# ==========================================================
-#  URGENT JOB FROM PAYLOAD
+#  URGENT JOB (payload)
 # ==========================================================
 
 def add_urgent_job_from_payload(data, t0: float, urgent_payload: dict):
@@ -577,12 +340,12 @@ def add_urgent_job_from_payload(data, t0: float, urgent_payload: dict):
 
     M_i = dict(data["M_i"])
     L_i = dict(data["L_i"])
-    Pred_i = {k: list(v) for k, v in data["Pred_i"].items()}
+    Pred_i = {int(k): list(v) for k, v in data["Pred_i"].items()}
     p_im = dict(data["p_im"])
     r_j = dict(data["r_j"])
     d_j = dict(data["d_j"])
     g_j = dict(data["g_j"])
-    p_j = dict(data["p_j"])
+    p_flag_j = dict(data.get("p_flag_j", data.get("p_j", {})) or {})
     t_grind_j = dict(data["t_grind_j"])
     t_paint_j = dict(data["t_paint_j"])
     beta_i = dict(data["beta_i"])
@@ -631,6 +394,7 @@ def add_urgent_job_from_payload(data, t0: float, urgent_payload: dict):
         if not pt:
             raise ValueError(f"urgent op {op_id} missing processing_time_by_machine")
 
+        # pt keys might be strings in JSON
         pt_machines = sorted({int(mm) for mm in pt.keys()})
 
         feasM_user = op_def.get("feasible_machines", None)
@@ -649,9 +413,11 @@ def add_urgent_job_from_payload(data, t0: float, urgent_payload: dict):
 
         for m in M_i[op_id]:
             val = pt.get(str(m), None)
+            if val is None and m in pt:
+                val = pt[m]
             if val is None:
                 raise ValueError(f"urgent op {op_id}: missing ptime for machine {m}")
-            p_im[(op_id, m)] = float(val)
+            p_im[(op_id, int(m))] = float(val)
 
         beta_i[op_id] = 1 if op_def.get("beta_big_station_required", False) else 0
         Pred_i[op_id] = []
@@ -673,7 +439,7 @@ def add_urgent_job_from_payload(data, t0: float, urgent_payload: dict):
     g_req = bool(post.get("grinding_required", False))
     p_req = bool(post.get("painting_required", False))
     g_j[job_id] = 1 if g_req else 0
-    p_j[job_id] = 1 if p_req else 0
+    p_flag_j[job_id] = 1 if p_req else 0
     t_grind_j[job_id] = float(post.get("t_grind_hours", 0.0)) if g_req else 0.0
     t_paint_j[job_id] = float(post.get("t_paint_hours", 0.0)) if p_req else 0.0
 
@@ -683,7 +449,7 @@ def add_urgent_job_from_payload(data, t0: float, urgent_payload: dict):
         "M_i": M_i, "L_i": L_i,
         "Pred_i": Pred_i, "p_im": p_im,
         "r_j": r_j, "d_j": d_j,
-        "g_j": g_j, "p_j": p_j,
+        "g_j": g_j, "p_flag_j": p_flag_j,
         "t_grind_j": t_grind_j, "t_paint_j": t_paint_j,
         "beta_i": beta_i,
         "urgent_job_id": job_id,
@@ -705,7 +471,7 @@ def add_split_remainders_for_running_ops(data, I_run, t0, old_solution):
     beta_i = data["beta_i"]
 
     S_old = old_solution["S_old"]
-    x_old = old_solution["x_old"]
+    x_old = old_solution.get("x_old", {})
 
     next_op = max(I) + 1
     rem_map = {}
@@ -721,7 +487,7 @@ def add_split_remainders_for_running_ops(data, I_run, t0, old_solution):
 
     def old_machine(i):
         for (ii, m), v in x_old.items():
-            if ii == int(i) and v == 1:
+            if int(ii) == int(i) and int(v) == 1:
                 return int(m)
         return None
 
@@ -749,11 +515,15 @@ def add_split_remainders_for_running_ops(data, I_run, t0, old_solution):
         remaining = max(0.01, full_p - elapsed)
 
         for m in M_i2[i_rem]:
-            p_im2[(i_rem, m)] = float(remaining)
+            p_im2[(i_rem, int(m))] = float(remaining)
 
+        # remainder starts after original (or after cut)
         Pred_i2[i_rem] = [i]
-        beta_i2[i_rem] = 0
 
+        # ✅ FIX: preserve big-station requirement if original had it
+        beta_i2[i_rem] = int(beta_i2.get(i, 0))
+
+        # successors of original should also depend on remainder (so work doesn't "skip")
         for k in list(Pred_i2.keys()):
             k = int(k)
             if k == i_rem or k == i:
@@ -777,574 +547,442 @@ def add_split_remainders_for_running_ops(data, I_run, t0, old_solution):
 
 
 # ==========================================================
-#  MODEL BUILDER (objective is T_max only)
+#  RESCHEDULE HEURISTIC: GT + ATC (fixed ops + outages supported)
 # ==========================================================
 
-def build_model(name, data,
-                unavailable_machines=None, unavailable_stations=None,
-                freeze_done_ops=None,
-                running_ops=None, mode="continue", t0=None,
-                free_ops=None,
-                old_solution=None):
+def _avg_pbar(data: Dict[str, Any]) -> float:
+    I = data["I"]
+    M_i = data["M_i"]
+    p_im = data["p_im"]
+    vals = []
+    for i in I:
+        for m in M_i[i]:
+            vals.append(float(p_im[(int(i), int(m))]))
+    return sum(vals) / max(1, len(vals))
+
+def _job_of(data: Dict[str, Any]) -> Dict[int, int]:
+    return op_to_job_map(data["O_j"])
+
+def _ready_time(i: int, job_of: Dict[int, int], data: Dict[str, Any], C: Dict[int, float]) -> float:
+    Pred_i = data["Pred_i"]
+    r_j = data["r_j"]
+    j = job_of[i]
+    rt = float(r_j[j])
+    preds = Pred_i.get(i, [])
+    if preds:
+        rt = max(rt, max(C[int(h)] for h in preds))
+    return rt
+
+def _atc_index(i: int, t_now: float, job_of: Dict[int, int], data: Dict[str, Any], pbar: float, k1: float, best_m_for_i: int) -> float:
+    d_j = data["d_j"]
+    p_im = data["p_im"]
+    j = job_of[i]
+    p_i = float(p_im[(int(i), int(best_m_for_i))])
+    slack = max(float(d_j[j]) - p_i - t_now, 0.0)
+    denom = max(k1 * pbar, 1e-9)
+    return (1.0 / max(p_i, 1e-9)) * math.exp(-slack / denom)
+
+def heuristic_reschedule_gt_atc(
+    data: Dict[str, Any],
+    fixed_ops: Dict[int, dict],
+    start_time_floor: float,
+    unavailable_machines: Optional[List[int]] = None,
+    unavailable_stations: Optional[List[int]] = None,
+    k1: float = 2.0,
+    eps: float = 1e-9,
+) -> Tuple[List[dict], dict]:
+    """
+    GT + ATC heuristic with:
+    - fixed_ops pre-scheduled (block resources up to their finish)
+    - start_time_floor: non-fixed ops won't start before this
+    - unavailable resources: new assignments cannot use them
+    """
     unavailable_machines = unavailable_machines or []
     unavailable_stations = unavailable_stations or []
-    freeze_done_ops = freeze_done_ops or []
-    running_ops = running_ops or []
-    free_ops = free_ops or []
+    badM = set(int(x) for x in unavailable_machines)
+    badL = set(int(x) for x in unavailable_stations)
 
-    J = data["J"]; I = data["I"]; O_j = data["O_j"]
-    M = data["M"]; L = data["L"]
-    M_i = data["M_i"]; L_i = data["L_i"]
+    J = data["J"]
+    I = [int(x) for x in data["I"]]
+    O_j = data["O_j"]
+    M = data["M"]
+    L = data["L"]
+    M_i = data["M_i"]
+    L_i = data["L_i"]
     Pred_i = data["Pred_i"]
     p_im = data["p_im"]
-    r_j = data["r_j"]; d_j = data["d_j"]
-    g_j = data["g_j"]; p_j = data["p_j"]
-    t_grind_j = data["t_grind_j"]; t_paint_j = data["t_paint_j"]
+    d_j = data["d_j"]
+    g_j = data["g_j"]
+    p_flag_j = data.get("p_flag_j", data.get("p_j", {})) or {}
+    t_grind_j = data["t_grind_j"]
+    t_paint_j = data["t_paint_j"]
     beta_i = data["beta_i"]
-    L_small = data["L_small"]
-    M_proc = data["M_proc"]; M_seq = data["M_seq"]; M_Lseq = data["M_Lseq"]
-    rem_map = data.get("rem_map", {})
+    L_small = set(int(x) for x in data["L_small"])
 
-    remainder_ops = set(int(v) for v in rem_map.values()) if rem_map else set()
-    rem_owner = {int(v): int(k) for k, v in rem_map.items()} if rem_map else {}
+    job_of = _job_of(data)
+    pbar = _avg_pbar(data)
 
-    model = Model(name)
+    avail_m = {int(m): 0.0 for m in M}
+    avail_l = {int(l): 0.0 for l in L}
 
-    x = model.addVars([(int(i), int(m)) for i in I for m in M_i[int(i)]], vtype=GRB.BINARY, name="x")
-    y = model.addVars([(int(i), int(l)) for i in I for l in L_i[int(i)]], vtype=GRB.BINARY, name="y")
+    S: Dict[int, float] = {}
+    C: Dict[int, float] = {}
+    am: Dict[int, int] = {}
+    al: Dict[int, int] = {}
+    scheduled = set()
 
-    # --------- IMPORTANT: build zM/zL only for (a<b) and common resources ----------
-    I_list = [int(v) for v in I]
-    nI = len(I_list)
+    # load fixed ops
+    for op_id, row in (fixed_ops or {}).items():
+        i = int(op_id)
+        s = float(row["start"])
+        c = float(row["finish"])
+        m = row.get("machine", None)
+        l = row.get("station", None)
 
-    zM_keys = []
-    zL_keys = []
-    for a in range(nI):
-        for b in range(a + 1, nI):
-            i = I_list[a]
-            h = I_list[b]
-            for m in set(M_i[i]).intersection(M_i[h]):
-                zM_keys.append((i, h, int(m)))
-            for l in set(L_i[i]).intersection(L_i[h]):
-                zL_keys.append((i, h, int(l)))
+        S[i] = s
+        C[i] = c
+        if m is not None:
+            am[i] = int(m)
+            avail_m[int(m)] = max(avail_m[int(m)], c)
+        if l is not None:
+            al[i] = int(l)
+            avail_l[int(l)] = max(avail_l[int(l)], c)
 
-    zM = model.addVars(zM_keys, vtype=GRB.BINARY, name="zM")
-    zL = model.addVars(zL_keys, vtype=GRB.BINARY, name="zL")
+        scheduled.add(i)
 
-    S = model.addVars(I_list, lb=0.0, vtype=GRB.CONTINUOUS, name="S")
-    C = model.addVars(I_list, lb=0.0, vtype=GRB.CONTINUOUS, name="C")
+    t = float(start_time_floor)
 
-    C_weld  = model.addVars([int(j) for j in J], lb=0.0, vtype=GRB.CONTINUOUS, name="C_weld")
-    C_final = model.addVars([int(j) for j in J], lb=0.0, vtype=GRB.CONTINUOUS, name="C_final")
+    def is_pred_done(i: int) -> bool:
+        preds = Pred_i.get(i, [])
+        return all(int(h) in C for h in preds)
 
-    T     = model.addVars([int(j) for j in J], lb=0.0, vtype=GRB.CONTINUOUS, name="T")
-    T_max = model.addVar(lb=0.0, vtype=GRB.CONTINUOUS, name="T_max")
-    C_max = model.addVar(lb=0.0, vtype=GRB.CONTINUOUS, name="C_max")
+    while len(scheduled) < len(I):
+        candidates = [i for i in I if i not in scheduled and is_pred_done(i)]
+        if not candidates:
+            raise RuntimeError("Heuristic deadlock: no eligible operations (precedence cycle?)")
 
-    model.setObjective(T_max, GRB.MINIMIZE)
+        R = {i: _ready_time(i, job_of, data, C) for i in candidates}
+        for i in candidates:
+            R[i] = max(R[i], float(start_time_floor))
 
-    running_set = set(int(i) for i in running_ops)
-    badM = set(int(m) for m in unavailable_machines)
-    badL = set(int(l) for l in unavailable_stations)
+        if all(R[i] > t + eps for i in candidates):
+            t = min(R[i] for i in candidates)
 
-    # keep vars
-    keep = None
-    if old_solution is not None and running_ops:
-        if t0 is None:
-            raise ValueError("t0 must be set when running_ops exist")
-        keep = model.addVars([int(i) for i in running_ops], vtype=GRB.BINARY, name="keep_running")
+        # batch at fixed t
+        while True:
+            ready = [i for i in candidates if R[i] <= t + eps]
+            if not ready:
+                break
 
-    # Assignment constraints (remainder activation depends on keep, in BOTH modes)
-    for i in I_list:
-        rhsM = 1
-        rhsL = 1
+            best_pair: Dict[int, Tuple[int, int, float, float]] = {}  # i -> (m,l,s,c)
 
-        if i in remainder_ops:
-            if keep is not None:
-                orig = rem_owner[i]
-                rhsM = 1 - keep[orig]
-                rhsL = 1 - keep[orig]
-            else:
-                rhsM = 0
-                rhsL = 0
+            for i in ready:
+                bestS = float("inf")
+                bestC = float("inf")
+                bestML = None
 
-        model.addConstr(quicksum(x[i, m] for m in M_i[i]) == rhsM, name=f"assign_M_{i}")
-        model.addConstr(quicksum(y[i, l] for l in L_i[i]) == rhsL, name=f"assign_L_{i}")
+                stations = [int(l) for l in L_i[i] if int(l) not in badL]
+                if int(beta_i.get(i, 0)) == 1:
+                    stations = [l for l in stations if l not in L_small]
+                if not stations:
+                    continue
 
-    frozen_ops = set(int(i) for i in freeze_done_ops) | set(int(i) for i in running_ops)
-    urgent_ops = set(int(i) for i in data.get("urgent_ops", []))
-    free_ops_set = set(int(i) for i in free_ops)
-    reschedulable_ops = (free_ops_set | urgent_ops | remainder_ops) - frozen_ops
+                machines = [int(m) for m in M_i[i] if int(m) not in badM]
+                if not machines:
+                    continue
 
-    if unavailable_machines:
-        for (ii, m) in list(x.keys()):
-            if int(ii) in reschedulable_ops and int(m) in badM:
-                model.addConstr(x[ii, m] == 0, name=f"unavailM_{ii}_{m}")
+                for m in machines:
+                    for l in stations:
+                        s = max(t, R[i], avail_m.get(m, 0.0), avail_l.get(l, 0.0))
+                        c = s + float(p_im[(int(i), int(m))])
+                        if (s < bestS - 1e-12) or (abs(s - bestS) <= 1e-12 and c < bestC - 1e-12):
+                            bestS, bestC = s, c
+                            bestML = (m, l)
 
-    if unavailable_stations:
-        for (ii, l) in list(y.keys()):
-            if int(ii) in reschedulable_ops and int(l) in badL:
-                model.addConstr(y[ii, l] == 0, name=f"unavailL_{ii}_{l}")
+                if bestML is None:
+                    continue
 
-    # PROCESSING TIME LINKING (running ops)
-    if old_solution is not None and running_ops:
-        S_old = old_solution["S_old"]
-        C_old = old_solution["C_old"]
-        x_old = old_solution["x_old"]
-        y_old = old_solution["y_old"]
+                m_best, l_best = bestML
+                best_pair[i] = (m_best, l_best, bestS, bestC)
 
-        def old_machine(i):
-            for (ii, m), v in x_old.items():
-                if ii == int(i) and v == 1:
-                    return int(m)
-            return None
+            startable = [i for i in ready if i in best_pair and abs(best_pair[i][2] - t) <= eps]
+            if not startable:
+                break
 
-        def old_station(i):
-            for (ii, l), v in y_old.items():
-                if ii == int(i) and v == 1:
-                    return int(l)
-            return None
+            i_star = min(startable, key=lambda ii: best_pair[ii][3])
+            m_star, l_star, _, _ = best_pair[i_star]
 
-        for i in [int(v) for v in running_ops]:
-            m0 = old_machine(i)
-            l0 = old_station(i)
+            conflict = [i_star]
+            for i in startable:
+                if i == i_star:
+                    continue
+                mi, li, _, _ = best_pair[i]
+                if mi == m_star or li == l_star:
+                    conflict.append(i)
 
-            for m in M_i[i]:
-                if (i, m) in x:
-                    model.addConstr(x[i, m] == int(x_old.get((i, m), 0)), name=f"fix_run_x_{i}_{m}")
-            for l in L_i[i]:
-                if (i, l) in y:
-                    model.addConstr(y[i, l] == int(y_old.get((i, l), 0)), name=f"fix_run_y_{i}_{l}")
+            def score(ii: int) -> float:
+                m_best = best_pair[ii][0]
+                return _atc_index(ii, t, job_of, data, pbar, k1, m_best)
 
-            model.addConstr(S[i] == float(S_old[i]), name=f"fix_run_S_{i}")
+            chosen = max(conflict, key=score)
+            m, l, s, c = best_pair[chosen]
 
-            broken = ((m0 is not None and m0 in badM) or (l0 is not None and l0 in badL))
-            if broken:
-                model.addConstr(keep[i] == 0, name=f"force_preempt_unavail_{i}")
-            else:
-                if mode == "continue":
-                    model.addConstr(keep[i] == 1, name=f"force_keep_continue_{i}")
+            S[chosen] = float(s)
+            C[chosen] = float(c)
+            am[chosen] = int(m)
+            al[chosen] = int(l)
+            avail_m[m] = float(c)
+            avail_l[l] = float(c)
+            scheduled.add(chosen)
 
-            if m0 is None:
-                m0 = M_i[i][0]
+            candidates.remove(chosen)
+            if not candidates:
+                break
 
-            full_p = float(p_im[(i, m0)])
-            elapsed = max(0.01, float(t0 - float(S_old[i])))
+            for i2 in candidates:
+                if is_pred_done(i2):
+                    R[i2] = max(_ready_time(i2, job_of, data, C), float(start_time_floor))
 
-            model.addGenConstrIndicator(keep[i], True,  C[i] == float(C_old[i]), name=f"ind_keepC_{i}")
-            model.addGenConstrIndicator(keep[i], True,  C[i] - S[i] == full_p,   name=f"ind_keepDur_{i}")
+        # advance time
+        if len(scheduled) < len(I):
+            next_t = float("inf")
 
-            model.addGenConstrIndicator(keep[i], False, C[i] == float(t0),       name=f"ind_preemptC_{i}")
-            model.addGenConstrIndicator(keep[i], False, C[i] - S[i] == elapsed,  name=f"ind_preemptDur_{i}")
+            for tt in avail_m.values():
+                if tt > t + eps:
+                    next_t = min(next_t, tt)
+            for tt in avail_l.values():
+                if tt > t + eps:
+                    next_t = min(next_t, tt)
 
-            i_rem = rem_map.get(i, None)
-            if i_rem is not None and int(i_rem) in I_list:
-                i_rem = int(i_rem)
-                model.addGenConstrIndicator(keep[i], True,  S[i_rem] == float(C_old[i]), name=f"ind_keepRemS_{i}")
-                model.addGenConstrIndicator(keep[i], True,  C[i_rem] == float(C_old[i]), name=f"ind_keepRemC_{i}")
-                model.addGenConstrIndicator(keep[i], False, S[i_rem] >= float(t0),       name=f"ind_preemptRemS_{i}")
+            remaining = [i for i in I if i not in scheduled and is_pred_done(i)]
+            if remaining:
+                R2 = [max(_ready_time(i, job_of, data, C), float(start_time_floor)) for i in remaining]
+                for rt in R2:
+                    if rt > t + eps:
+                        next_t = min(next_t, rt)
 
-    # Standard ptime constraints for NON-running ops
-    for i in I_list:
-        if i in running_set and old_solution is not None:
-            continue
-        for m in M_i[i]:
-            pijm = float(p_im[(i, m)])
-            model.addConstr(C[i] - S[i] >= pijm - M_proc * (1 - x[i, m]), name=f"ptime_lb_{i}_{m}")
-            model.addConstr(C[i] - S[i] <= pijm + M_proc * (1 - x[i, m]), name=f"ptime_ub_{i}_{m}")
+            if next_t == float("inf"):
+                raise RuntimeError("Stuck: cannot advance time (check data feasibility).")
+            t = next_t
 
-    # big station feasibility
-    for i in I_list:
-        if beta_i.get(i, 0) == 1:
-            for l in L_small:
-                if int(l) in set(int(v) for v in L_i[i]):
-                    if (i, int(l)) in y:
-                        model.addConstr(y[i, int(l)] == 0, name=f"small_forbid_{i}_{l}")
-
-    # precedence
-    for i in I_list:
-        for h in Pred_i.get(i, []):
-            model.addConstr(S[i] >= C[int(h)], name=f"prec_{h}_{i}")
-
-    # release (job first op)
-    for j in [int(v) for v in J]:
-        first_op = int(O_j[j][0])
-        model.addConstr(S[first_op] >= float(r_j[j]), name=f"release_{j}")
-
-    # -------------------------
-    # FIXED MACHINE SEQUENCING
-    # -------------------------
-    for (i, h, m) in zM.keys():
-        # zM=1 -> i before h
-        # zM=0 -> h before i
-        model.addConstr(
-            S[h] >= C[i]
-                   - M_seq * (1 - zM[i, h, m])
-                   - M_seq * (2 - x[i, m] - x[h, m]),
-            name=f"no_overlapM_h_after_i_{i}_{h}_{m}"
-        )
-        model.addConstr(
-            S[i] >= C[h]
-                   - M_seq * (zM[i, h, m])
-                   - M_seq * (2 - x[i, m] - x[h, m]),
-            name=f"no_overlapM_i_after_h_{i}_{h}_{m}"
-        )
-
-    # -------------------------
-    # FIXED STATION SEQUENCING
-    # -------------------------
-    for (i, h, l) in zL.keys():
-        model.addConstr(
-            S[h] >= C[i]
-                   - M_Lseq * (1 - zL[i, h, l])
-                   - M_Lseq * (2 - y[i, l] - y[h, l]),
-            name=f"no_overlapL_h_after_i_{i}_{h}_{l}"
-        )
-        model.addConstr(
-            S[i] >= C[h]
-                   - M_Lseq * (zL[i, h, l])
-                   - M_Lseq * (2 - y[i, l] - y[h, l]),
-            name=f"no_overlapL_i_after_h_{i}_{h}_{l}"
-        )
-
-    # welding completion
-    for j in [int(v) for v in J]:
+    # objectives
+    C_weld = {}
+    C_final = {}
+    T = {}
+    for j in J:
+        cwj = 0.0
         for op in O_j[j]:
-            op = int(op)
-            model.addConstr(C_weld[j] >= C[op], name=f"Cweld_ge_{j}_{op}")
+            cwj = max(cwj, float(C[int(op)]))
+        C_weld[int(j)] = cwj
 
-    # final completion
-    for j in [int(v) for v in J]:
-        model.addConstr(
-            C_final[j] == C_weld[j] + g_j[j] * t_grind_j[j] + p_j[j] * t_paint_j[j],
-            name=f"Cfinal_{j}"
-        )
+        cf = cwj + float(g_j[j]) * float(t_grind_j[j]) + float(p_flag_j[j]) * float(t_paint_j[j])
+        C_final[int(j)] = float(cf)
+        T[int(j)] = max(0.0, float(cf) - float(d_j[j]))
 
-    for j in [int(v) for v in J]:
-        model.addConstr(T[j] >= C_final[j] - float(d_j[j]), name=f"Tdef_{j}")
-        model.addConstr(C_max >= C_final[j], name=f"Cmax_ge_{j}")
-        model.addConstr(T_max >= T[j], name=f"Tmax_ge_{j}")
-
-    if t0 is not None and free_ops:
-        for i in [int(v) for v in free_ops]:
-            if i in I_list:
-                model.addConstr(S[i] >= float(t0), name=f"free_after_t0_{i}")
-
-    # freeze DONE ops only
-    if old_solution is not None:
-        S_old = old_solution["S_old"]
-        C_old = old_solution["C_old"]
-        x_old = old_solution["x_old"]
-        y_old = old_solution["y_old"]
-
-        done_set = set(int(v) for v in freeze_done_ops)
-
-        for i in done_set:
-            if i in I_list:
-                model.addConstr(S[i] == float(S_old[i]), name=f"freeze_done_S_{i}")
-                model.addConstr(C[i] == float(C_old[i]), name=f"freeze_done_C_{i}")
-
-        for (i, m) in list(x.keys()):
-            if int(i) in done_set:
-                model.addConstr(x[i, m] == int(x_old.get((int(i), int(m)), 0)), name=f"freeze_done_x_{i}_{m}")
-        for (i, l) in list(y.keys()):
-            if int(i) in done_set:
-                model.addConstr(y[i, l] == int(y_old.get((int(i), int(l)), 0)), name=f"freeze_done_y_{i}_{l}")
-
-    model.update()
-    return model, x, y, S, C, C_weld, C_final, T, T_max, C_max, keep
-
-
-# ==========================================================
-#  SOLVE WRAPPERS
-# ==========================================================
-
-def solve_baseline(data, plan_start_iso: str, method: str = "mip"):
-    """
-    method:
-      - "mip"       -> current Gurobi model
-      - "heuristic" -> ATCS list scheduling
-    """
-    method = (method or "mip").lower().strip()
-
-    if method == "heuristic":
-        sched, obj = heuristic_schedule(
-            data,
-            fixed_ops=None,
-            start_time_floor=0.0,
-            k1=2.0,
-            unavailable_machines=None,
-            unavailable_stations=None
-        )
-
-        S_old = {int(r["op_id"]): float(r["start"]) for r in sched}
-        C_old = {int(r["op_id"]): float(r["finish"]) for r in sched}
-
-        x_old = {}
-        y_old = {}
-        for r in sched:
-            i = int(r["op_id"])
-            m = r.get("machine", None)
-            l = r.get("station", None)
-            if m is not None:
-                x_old[_tuplekey_to_str(i, int(m))] = 1
-            if l is not None:
-                y_old[_tuplekey_to_str(i, int(l))] = 1
-
-        return {
-            "plan_start_iso": plan_start_iso,
-            "objective": {"T_max": float(obj["T_max"]), "C_max": float(obj["C_max"])},
-            "schedule": sched,
-            "S_old": S_old, "C_old": C_old,
-            "x_old": x_old, "y_old": y_old
-        }
-
-    model, x, y, S, C, Cw, Cf, T, Tmax, Cmax, _ = build_model("Baseline", data)
-    model.optimize()
-    if model.SolCount == 0:
-        raise RuntimeError(f"No feasible baseline. Status={model.Status}")
-
-    I = data["I"]
-    S_old, C_old, x_old, y_old = extract_old_solution(I, x, y, S, C)
-
-    job_of = op_to_job_map(data["O_j"])
-    chosen_m, chosen_l = extract_assignment_for_ops(I, data["M_i"], data["L_i"], x, y)
+    Tmax = max(T.values()) if T else 0.0
+    Cmax = max(C_final.values()) if C_final else 0.0
 
     schedule = []
-    for i in I:
-        i = int(i)
+    for i in sorted(I, key=lambda x: (S.get(x, 0.0), C.get(x, 0.0), x)):
+        # NOTE: am/al should exist for all scheduled ops, but be safe:
         schedule.append({
-            "op_id": i,
+            "op_id": int(i),
             "op_label": str(i),
             "job_id": int(job_of.get(i, -1)),
-            "start": float(S[i].X),
-            "finish": float(C[i].X),
-            "machine": chosen_m[i],
-            "station": chosen_l[i],
+            "start": float(S[i]),
+            "finish": float(C[i]),
+            "machine": int(am[i]) if i in am else None,
+            "station": int(al[i]) if i in al else None,
         })
 
-    return {
-        "plan_start_iso": plan_start_iso,
-        "objective": {"T_max": float(Tmax.X), "C_max": float(Cmax.X)},
-        "schedule": schedule,
-        "S_old": S_old, "C_old": C_old,
-        "x_old": x_old, "y_old": y_old
+    obj = {
+        "T_max": float(Tmax),
+        "C_max": float(Cmax),
+        "C_final": {int(j): float(C_final[j]) for j in C_final},
+        "T": {int(j): float(T[j]) for j in T},
     }
+    return schedule, obj
 
 
-def solve_reschedule(
-    data_base,
-    old_solution,
-    urgent_payload: dict,
-    unavailable_machines=None,
-    unavailable_stations=None,
-    mode="continue",
-    method: str = "mip",
-):
-    """
-    method:
-      - "mip"       -> current Gurobi rescheduling model
-      - "heuristic" -> fixes done/running (baseline), schedules remainder by ATCS heuristic
+# ==========================================================
+#  PUBLIC: solve_reschedule (urgent + outages)
+# ==========================================================
 
-    IMPORTANT RULE:
-      - If there is a machine/station breakdown (unavailable_* not empty),
-        a running operation on that resource CANNOT "continue & finish" there.
-        => It must be cut at t0 and remainder must be assigned elsewhere.
-      - For urgent job / due date changes WITHOUT breakdown, model may keep or preempt.
-    """
+def solve_reschedule_open_source(
+    data_base: Dict[str, Any],
+    old_solution: Dict[str, Any],
+    urgent_payload: Optional[dict],
+    unavailable_machines: Optional[List[int]] = None,
+    unavailable_stations: Optional[List[int]] = None,
+    mode: str = "continue",   # "continue" tercih 1
+) -> Dict[str, Any]:
     unavailable_machines = unavailable_machines or []
     unavailable_stations = unavailable_stations or []
-    method = (method or "mip").lower().strip()
+    mode = (mode or "continue").strip().lower()
+
+    # ✅ CRITICAL: normalize scenario data (JSON-safe -> Python-safe)
+    data_base = normalize_data(data_base)
 
     old_solution = normalize_old_solution(old_solution)
 
     if "plan_start_iso" not in old_solution:
-        raise ValueError("baseline_solution.json is missing plan_start_iso. Re-run baseline.")
+        raise ValueError("baseline_solution.json is missing plan_start_iso.")
 
-    plan_calendar = old_solution.get("plan_calendar", {})
+    plan_calendar = old_solution.get("plan_calendar") or {"utc_offset": "+03:00"}
     t0 = compute_t0_from_plan_start(old_solution["plan_start_iso"], plan_calendar=plan_calendar)
 
-    I0 = data_base["I"]
+    I0 = _to_int_list(data_base["I"])
     I_done, I_run, I_free = classify_ops_by_t0(I0, old_solution["S_old"], old_solution["C_old"], t0)
 
-    data1 = add_urgent_job_from_payload(data_base, t0=t0, urgent_payload=urgent_payload)
+    # Apply urgent
+    data1 = data_base
+    if urgent_payload:
+        data1 = add_urgent_job_from_payload(data_base, t0=t0, urgent_payload=urgent_payload)
+
+    # Split remainders for running ops
     data2 = add_split_remainders_for_running_ops(data1, I_run, t0, old_solution)
 
-    if method == "heuristic":
-        job_of = op_to_job_map(data2["O_j"])
+    job_of = _job_of(data2)
 
-        x_old = old_solution.get("x_old", {})
-        y_old = old_solution.get("y_old", {})
+    x_old = old_solution.get("x_old", {})
+    y_old = old_solution.get("y_old", {})
 
-        badM = set(int(m) for m in unavailable_machines)
-        badL = set(int(l) for l in unavailable_stations)
+    # Build fallback map from old_solution["schedule"] if present
+    schedule_rows = old_solution.get("schedule", []) or []
+    sch_machine = {}
+    sch_station = {}
+    for r in schedule_rows:
+        try:
+            op_id = int(r.get("op_id"))
+        except Exception:
+            continue
+        if "machine" in r and r["machine"] is not None:
+            sch_machine[op_id] = int(r["machine"])
+        if "station" in r and r["station"] is not None:
+            sch_station[op_id] = int(r["station"])
 
-        def old_machine(i):
-            for (ii, m), v in x_old.items():
-                if int(ii) == int(i) and int(v) == 1:
-                    return int(m)
-            return None
+    badM = set(int(m) for m in unavailable_machines)
+    badL = set(int(l) for l in unavailable_stations)
 
-        def old_station(i):
-            for (ii, l), v in y_old.items():
-                if int(ii) == int(i) and int(v) == 1:
-                    return int(l)
-            return None
+    def old_machine(i: int) -> Optional[int]:
+        # prefer x_old
+        for (ii, m), v in x_old.items():
+            if int(ii) == int(i) and int(v) == 1:
+                return int(m)
+        # fallback schedule
+        if int(i) in sch_machine:
+            return int(sch_machine[int(i)])
+        return None
 
-        fixed = {}
+    def old_station(i: int) -> Optional[int]:
+        for (ii, l), v in y_old.items():
+            if int(ii) == int(i) and int(v) == 1:
+                return int(l)
+        if int(i) in sch_station:
+            return int(sch_station[int(i)])
+        return None
 
-        for i in I_done:
-            i = int(i)
-            fixed[i] = {
-                "op_id": i,
-                "op_label": str(i),
-                "job_id": int(job_of.get(i, -1)),
-                "start": float(old_solution["S_old"][i]),
-                "finish": float(old_solution["C_old"][i]),
-                "machine": old_machine(i),
-                "station": old_station(i),
-            }
+    # Fixed ops = done + running (running possibly cut)
+    fixed: Dict[int, dict] = {}
 
-        for i in I_run:
-            i = int(i)
-            m0 = old_machine(i)
-            l0 = old_station(i)
+    for i in I_done:
+        i = int(i)
+        m0 = old_machine(i)
+        l0 = old_station(i)
 
-            start_i = float(old_solution["S_old"][i])
-            finish_i = float(old_solution["C_old"][i])
+        # final fallback if still None:
+        if m0 is None:
+            m0 = int(data2["M_i"][i][0])
+        if l0 is None:
+            l0 = int(data2["L_i"][i][0])
 
-            if (m0 is not None and m0 in badM) or (l0 is not None and l0 in badL):
-                finish_i = float(t0)
+        fixed[i] = {
+            "op_id": i,
+            "op_label": str(i),
+            "job_id": int(job_of.get(i, -1)),
+            "start": float(old_solution["S_old"][i]),
+            "finish": float(old_solution["C_old"][i]),
+            "machine": int(m0),
+            "station": int(l0),
+        }
 
-            fixed[i] = {
-                "op_id": i,
-                "op_label": str(i),
-                "job_id": int(job_of.get(i, -1)),
-                "start": float(start_i),
-                "finish": float(finish_i),
-                "machine": m0,
-                "station": l0,
-            }
+    keep_decisions: Dict[int, int] = {}
 
-        sched, obj = heuristic_schedule(
-            data2,
-            fixed_ops=fixed,
-            start_time_floor=float(t0),
-            k1=2.0,
-            unavailable_machines=unavailable_machines,
-            unavailable_stations=unavailable_stations,
-        )
+    for i in I_run:
+        i = int(i)
+        m0 = old_machine(i)
+        l0 = old_station(i)
 
-        urgent = int(data2.get("urgent_job_id"))
-        urgent_ops = data2.get("urgent_ops", [])
+        if m0 is None:
+            m0 = int(data2["M_i"][i][0])
+        if l0 is None:
+            l0 = int(data2["L_i"][i][0])
+
+        start_i = float(old_solution["S_old"][i])
+        finish_i = float(old_solution["C_old"][i])
+
+        broken = ((m0 is not None and int(m0) in badM) or (l0 is not None and int(l0) in badL))
+
+        if broken:
+            finish_i = float(t0)   # outage => cut
+            keep_decisions[i] = 0
+        else:
+            # open-source version: default keep=1
+            keep_decisions[i] = 1
+
+        fixed[i] = {
+            "op_id": i,
+            "op_label": str(i),
+            "job_id": int(job_of.get(i, -1)),
+            "start": float(start_i),
+            "finish": float(finish_i),
+            "machine": int(m0),
+            "station": int(l0),
+        }
+
+    # Schedule remaining with GT+ATC
+    sched, obj = heuristic_reschedule_gt_atc(
+        data=data2,
+        fixed_ops=fixed,
+        start_time_floor=float(t0),
+        unavailable_machines=unavailable_machines,
+        unavailable_stations=unavailable_stations,
+        k1=2.0,
+    )
+
+    # Urgent info
+    urgent_info = None
+    if urgent_payload:
+        uj = int(data2.get("urgent_job_id"))
+        uops = [int(x) for x in data2.get("urgent_ops", [])]
 
         C_by_op = {int(r["op_id"]): float(r["finish"]) for r in sched}
         Cw_u = 0.0
-        for op in data2["O_j"][urgent]:
+        for op in data2["O_j"][uj]:
             Cw_u = max(Cw_u, C_by_op[int(op)])
+
+        pflag_map = data2.get("p_flag_j", data2.get("p_j", {})) or {}
         Cf_u = (
-            Cw_u
-            + data2["g_j"][urgent] * data2["t_grind_j"][urgent]
-            + data2["p_j"][urgent] * data2["t_paint_j"][urgent]
+            float(Cw_u)
+            + float(data2["g_j"][uj]) * float(data2["t_grind_j"][uj])
+            + float(pflag_map.get(uj, 0)) * float(data2["t_paint_j"][uj])
         )
-        T_u = max(0.0, Cf_u - float(data2["d_j"][urgent]))
-
-        return {
-            "t0": float(t0),
-            "sets": {"I_done": I_done, "I_run": I_run, "I_free": I_free},
-            "objective": {"T_max": float(obj["T_max"]), "C_max": float(obj["C_max"])},
-            "urgent": {
-                "job_id": urgent,
-                "ops": [int(i) for i in urgent_ops],
-                "C_final": float(Cf_u),
-                "T": float(T_u),
-                "d": float(data2["d_j"][urgent])
-            },
-            "keep_decisions": {},
-            "schedule": sched,
-            "changed_ops": []
+        T_u = max(0.0, Cf_u - float(data2["d_j"][uj]))
+        urgent_info = {
+            "job_id": uj,
+            "ops": uops,
+            "C_final": float(Cf_u),
+            "T": float(T_u),
+            "d": float(data2["d_j"][uj]),
         }
-
-    model, x, y, S, C, Cw, Cf, T, Tmax, Cmax, keep = build_model(
-        name="Reschedule",
-        data=data2,
-        unavailable_machines=unavailable_machines,
-        unavailable_stations=unavailable_stations,
-        freeze_done_ops=I_done,
-        running_ops=I_run,
-        mode=mode,
-        t0=t0,
-        free_ops=I_free,
-        old_solution=old_solution
-    )
-    model.optimize()
-
-    if model.SolCount == 0:
-        model.computeIIS()
-        model.write("iis.ilp")
-        raise RuntimeError(f"No feasible reschedule. Status={model.Status}")
-
-    urgent = int(data2.get("urgent_job_id"))
-    urgent_ops = data2.get("urgent_ops", [])
-
-    keep_out = {}
-    if mode == "optimize" and keep is not None:
-        for i in I_run:
-            keep_out[int(i)] = int(round(keep[int(i)].X))
-
-    job_of = op_to_job_map(data2["O_j"])
-    chosen_m, chosen_l = extract_assignment_for_ops(data2["I"], data2["M_i"], data2["L_i"], x, y)
-
-    rem_map = data2.get("rem_map", {})
-    rem_to_orig = {int(v): int(k) for k, v in rem_map.items()}
-
-    schedule_new = []
-    for i in data2["I"]:
-        i = int(i)
-        label = str(i)
-        if i in rem_to_orig:
-            label = f"{rem_to_orig[i]}(cont)"
-        schedule_new.append({
-            "op_id": i,
-            "op_label": label,
-            "job_id": int(job_of.get(i, -1)),
-            "start": float(S[i].X),
-            "finish": float(C[i].X),
-            "machine": chosen_m[i],
-            "station": chosen_l[i],
-        })
-
-    changed_ops = []
-    for i in data_base["I"]:
-        old_s = old_solution["S_old"].get(int(i), None)
-        old_c = old_solution["C_old"].get(int(i), None)
-        if old_s is None:
-            continue
-
-        new_s = float(S[int(i)].X) if int(i) in S else None
-        new_c = float(C[int(i)].X) if int(i) in C else None
-        if new_s is None or new_c is None:
-            continue
-
-        if abs(new_s - old_s) > 1e-6 or abs(new_c - old_c) > 1e-6:
-            changed_ops.append({
-                "op_id": int(i),
-                "old_start": float(old_s), "old_finish": float(old_c),
-                "new_start": float(new_s), "new_finish": float(new_c),
-            })
 
     return {
         "t0": float(t0),
         "sets": {"I_done": I_done, "I_run": I_run, "I_free": I_free},
-        "objective": {"T_max": float(Tmax.X), "C_max": float(Cmax.X)},
-        "urgent": {
-            "job_id": urgent,
-            "ops": [int(i) for i in urgent_ops],
-            "C_final": float(Cf[urgent].X),
-            "T": float(T[urgent].X),
-            "d": float(data2["d_j"][urgent])
-        },
-        "keep_decisions": keep_out,
-        "schedule": schedule_new,
-        "changed_ops": changed_ops
+        "objective": {"T_max": float(obj["T_max"]), "C_max": float(obj["C_max"])},
+        "urgent": urgent_info,
+        "keep_decisions": {int(k): int(v) for k, v in keep_decisions.items()},
+        "schedule": sched,
+        "changed_ops": [],
+        "note": "Open-source heuristic reschedule (GT+ATC)."
     }
