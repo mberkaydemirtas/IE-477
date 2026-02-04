@@ -8,7 +8,7 @@ BASELINE:
   - HeuristicBaseModel.run_heuristic(data) -> baseline_solution.json (senin eski formatında)
 
 RESCHEDULE:
-  - solver_core.solve_reschedule_open_source(...) -> reschedule_solution.json
+  - solver_core.solve_reschedule(...) -> reschedule_solution.json
 
 SCENARIO COMPAT:
   - supports:
@@ -32,7 +32,7 @@ from typing import Any, Dict, Tuple, Optional
 from HeuristicBaseModel import run_heuristic  # ✅ baseline burada
 
 # ✅ Open-source rescheduling + base data builder burada olmalı
-from solver_core import make_base_data, solve_reschedule_open_source
+from solver_core import make_base_data, solve_reschedule
 
 
 # ==========================================================
@@ -44,352 +44,248 @@ def _load_json(path: str) -> dict:
         return json.load(f)
 
 def _save_json(path: str, obj: dict):
-    os.makedirs(os.path.dirname(path), exist_ok=True)
-    with open(path, "w", encoding="utf-8") as f:
+    # Atomic write to avoid half-written / invalid JSON if the script crashes.
+    folder = os.path.dirname(path)
+    if folder:
+        os.makedirs(folder, exist_ok=True)
+
+    tmp_path = path + ".tmp"
+    with open(tmp_path, "w", encoding="utf-8") as f:
         json.dump(obj, f, indent=2, ensure_ascii=False)
+    os.replace(tmp_path, path)
 
 
-# ==========================================================
-#  HELPERS
-# ==========================================================
+# ============================
+#  Scenario parsing helpers
+# ============================
 
-def _tuple_key_str(i: int, k: int) -> str:
-    return f"{int(i)},{int(k)}"
+def _get_scenario_dict(path: str) -> dict:
+    sc = _load_json(path)
 
-def _scenario_tag(scn: dict, scenario_path: str) -> str:
-    sid = scn.get("scenario_id", None)
-    if sid is not None:
-        s = str(sid).strip()
-        return f"s{s.zfill(2)}" if s.isdigit() else f"s_{s}"
+    # allow nesting under "reschedule"
+    if "reschedule" in sc and isinstance(sc["reschedule"], dict):
+        merged = dict(sc)
+        for k, v in sc["reschedule"].items():
+            if k not in merged:
+                merged[k] = v
+        # keep original too
+        merged["_reschedule_block"] = sc["reschedule"]
+        sc = merged
 
-    base = os.path.basename(scenario_path).replace(".json", "")
-    parts = base.split("_")
-    for p in parts:
-        if p.isdigit():
-            return f"s{p.zfill(2)}"
+    return sc
 
-    ts = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
-    return f"s_{ts}"
+def _get_plan_start_iso(sc: dict) -> Optional[str]:
+    return sc.get("plan_start_iso") or sc.get("planStartISO") or sc.get("plan_start")
 
-def _pick_scenario_name(scn: dict, scenario_path: str) -> str:
-    return (
-        scn.get("scenario_name")
-        or scn.get("name")
-        or scn.get("title")
-        or os.path.basename(scenario_path)
-    )
+def _get_scenario_name(sc: dict) -> str:
+    return sc.get("scenario_name") or sc.get("name") or sc.get("scenario") or "Unnamed Scenario"
 
-def _pick_outputs(scn: dict, workdir: str):
-    base_out = scn.get("baseline_output") or "baseline_solution.json"
-    res_out = scn.get("reschedule_output") or "reschedule_solution.json"
+def _get_overrides(sc: dict) -> dict:
+    # baseline_overrides used for baseline creation; overrides for general
+    return sc.get("baseline_overrides") or sc.get("overrides") or {}
 
-    if not os.path.isabs(base_out):
-        base_out = os.path.join(workdir, base_out)
-    if not os.path.isabs(res_out):
-        res_out = os.path.join(workdir, res_out)
+def _get_disruptions(sc: dict) -> Tuple[list, list]:
+    dis = sc.get("disruptions") or {}
+    um = dis.get("unavailable_machines") or sc.get("unavailable_machines") or []
+    us = dis.get("unavailable_stations") or sc.get("unavailable_stations") or []
+    return um, us
 
-    canonical_base = os.path.join(workdir, "baseline_solution.json")
-    canonical_res = os.path.join(workdir, "reschedule_solution.json")
-    return base_out, res_out, canonical_base, canonical_res
+def _get_mode(sc: dict) -> str:
+    # only used if solver_core supports modes
+    return sc.get("mode") or "default"
 
-def _run_plotter_and_archive(tag: str, workdir: str):
-    plot_script = os.path.join(workdir, "plot_gantt_all.py")
-    if not os.path.exists(plot_script):
-        print(f"⚠️ plot_gantt_all.py not found at: {plot_script}")
-        return
+def _get_k1(sc: dict) -> float:
+    return float(sc.get("k1", 2.0))
 
-    print("📊 Generating Gantt charts (with legend)...")
-    subprocess.run([sys.executable, plot_script], cwd=workdir, check=True)
+def _get_urgent_payload(sc: dict, base_dir: str) -> Optional[dict]:
+    # supports:
+    #  urgent_job : dict
+    #  urgent_payload : dict
+    #  urgent_payload_path : string
+    if isinstance(sc.get("urgent_job"), dict):
+        return sc["urgent_job"]
+    if isinstance(sc.get("urgent_payload"), dict):
+        return sc["urgent_payload"]
 
-    outputs = [
-        "gantt_machine_baseline.png",
-        "gantt_station_baseline.png",
-        "gantt_machine_reschedule.png",
-        "gantt_station_reschedule.png",
-    ]
-
-    for fn in outputs:
-        src = os.path.join(workdir, fn)
-        if os.path.exists(src):
-            name, ext = os.path.splitext(fn)
-            dst = os.path.join(workdir, f"{name}_{tag}{ext}")
-            shutil.copyfile(src, dst)
-            print(f"✅ Saved: {dst}")
-
-def _apply_overrides_to_data(data: dict, overrides: dict) -> dict:
-    """
-    make_base_data(overrides=...) ile aynı tarz merge:
-    - dict ise key bazında override eder
-    - diğer tiplerde direkt replace
-    """
-    if not overrides:
-        return data
-
-    out = dict(data)
-    for key, val in overrides.items():
-        if key not in out:
-            raise ValueError(f"Unknown override key in scenario: {key}")
-
-        if isinstance(out[key], dict) and isinstance(val, dict):
-            new_map = dict(out[key])
-            for kk, vv in val.items():
-                try:
-                    ik = int(kk)
-                except Exception:
-                    ik = kk
-                new_map[ik] = vv
-            out[key] = new_map
-        else:
-            out[key] = val
-
-    return out
-
-def _pick_disruptions(scn: dict):
-    if "disruptions" in scn and isinstance(scn["disruptions"], dict):
-        d = scn["disruptions"]
-        return d.get("unavailable_machines", []), d.get("unavailable_stations", [])
-
-    if "reschedule" in scn and isinstance(scn["reschedule"], dict):
-        r = scn["reschedule"]
-        if "disruptions" in r and isinstance(r["disruptions"], dict):
-            d = r["disruptions"]
-            return d.get("unavailable_machines", []), d.get("unavailable_stations", [])
-        return r.get("unavailable_machines", []), r.get("unavailable_stations", [])
-
-    return scn.get("unavailable_machines", []), scn.get("unavailable_stations", [])
-
-def _pick_mode(scn: dict) -> str:
-    # tercih 1 => continue
-    if "mode" in scn:
-        return scn.get("mode") or "continue"
-    if "reschedule" in scn and isinstance(scn["reschedule"], dict):
-        return scn["reschedule"].get("mode", "continue")
-    return "continue"
-
-def _load_urgent_payload_from_path(path: str, workdir: str) -> dict:
-    if not path:
-        return {}
-
-    # relative ise workdir'e göre dene
-    if not os.path.isabs(path):
-        p2 = os.path.join(workdir, path)
+    p = sc.get("urgent_payload_path")
+    if isinstance(p, str) and p.strip():
+        p2 = p
+        if not os.path.isabs(p2):
+            p2 = os.path.join(base_dir, p2)
         if os.path.exists(p2):
-            path = p2
+            return _load_json(p2)
+    return None
 
-    if not os.path.exists(path):
-        raise FileNotFoundError(f"urgent_payload_path not found: {path}")
+def _get_t_now_iso(sc: dict) -> Optional[str]:
+    # user may define reschedule time explicitly
+    return sc.get("t_now_iso") or sc.get("reschedule_time_iso") or sc.get("tNowISO")
 
-    uj = _load_json(path)
+def _parse_iso_dt(iso_str: str) -> datetime:
+    # Accepts with/without timezone. If none, assume UTC.
+    dt = datetime.fromisoformat(iso_str.replace("Z", "+00:00"))
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return dt
 
-    # desteklenen formatlar:
-    # { "urgent_job": {...} }  veya { "job_id": ... }
-    if isinstance(uj, dict) and "urgent_job" in uj:
-        return uj
-    if isinstance(uj, dict) and "job_id" in uj:
-        return {"urgent_job": uj}
-    return uj if isinstance(uj, dict) else {}
+def _compute_t0_from_iso(plan_start_iso: str, t_now_iso: str) -> float:
+    ps = _parse_iso_dt(plan_start_iso)
+    tn = _parse_iso_dt(t_now_iso)
+    return max(0.0, (tn - ps).total_seconds() / 3600.0)
 
-def _pick_urgent_payload(scn: dict, workdir: str) -> dict:
+
+# ==========================================================
+#  Paths
+# ==========================================================
+
+def _get_this_dir() -> str:
+    return os.path.dirname(os.path.abspath(__file__))
+
+def _baseline_path() -> str:
+    return os.path.join(_get_this_dir(), "baseline_solution.json")
+
+def _reschedule_path() -> str:
+    return os.path.join(_get_this_dir(), "reschedule_solution.json")
+
+def _gantt_dir_for_scenario(sc: dict) -> str:
+    name = _get_scenario_name(sc)
+    # simple folder-friendly label
+    safe = "".join(ch if (ch.isalnum() or ch in "_-") else "_" for ch in name).strip("_")
+    if not safe:
+        safe = "scenario"
+    return os.path.join(_get_this_dir(), f"{safe.lower()}_gantts")
+
+
+# ==========================================================
+#  Baseline (optional) helper
+# ==========================================================
+
+def ensure_baseline(sc: dict, scenario_path: str) -> dict:
     """
-    Supports multiple formats:
-    - "urgent_job": {...}
-    - "urgent_payload": {...}
-    - "urgent_payload_path": "scenarios/urgent_x.json"
-    - nested: "reschedule": {"urgent_payload_path": "..."} / {"urgent_job":...} / {"urgent_payload":...}
+    Baseline must exist for rescheduling. If missing, generate it using the same data logic as baseline runner.
     """
-    if "urgent_job" in scn and isinstance(scn["urgent_job"], dict):
-        return {"urgent_job": scn["urgent_job"]}
+    bp = _baseline_path()
+    if os.path.exists(bp):
+        return _load_json(bp)
 
-    if "urgent_payload" in scn and isinstance(scn["urgent_payload"], dict):
-        return scn["urgent_payload"]
+    print("⚠️ baseline_solution.json not found. Creating baseline now...")
 
-    if "urgent_payload_path" in scn:
-        return _load_urgent_payload_from_path(scn.get("urgent_payload_path"), workdir)
+    overrides = _get_overrides(sc)
+    if isinstance(sc.get("data"), dict):
+        data = sc["data"]
+    else:
+        data = make_base_data(overrides=overrides)
 
-    if "reschedule" in scn and isinstance(scn["reschedule"], dict):
-        rp = scn["reschedule"]
-        if "urgent_job" in rp and isinstance(rp["urgent_job"], dict):
-            return {"urgent_job": rp["urgent_job"]}
-        if "urgent_payload" in rp and isinstance(rp["urgent_payload"], dict):
-            return rp["urgent_payload"]
-        if "urgent_payload_path" in rp:
-            return _load_urgent_payload_from_path(rp.get("urgent_payload_path"), workdir)
+    res = run_heuristic(data, k1=_get_k1(sc))
 
-    return {}
-
-def _adapt_data_for_heuristic(data: dict) -> dict:
-    """
-    HeuristicBaseModel verify_data_basic beklediği anahtarlar için adapter:
-      - p_flag_j bekliyor; bizde p_j varsa kopyala
-    """
-    d = dict(data)
-    if "p_flag_j" not in d and "p_j" in d:
-        d["p_flag_j"] = d["p_j"]
-    return d
-
-
-def _baseline_to_solution_json(
-    plan_start_iso: str,
-    plan_calendar: dict,
-    scenario_name: str,
-    data: dict,
-    heuristic_res
-) -> dict:
-    """
-    HeuristicBaseModel.run_heuristic çıktısını senin eski baseline JSON formatına çevirir.
-    """
-    I = [int(x) for x in data["I"]]
-
-    # S_old / C_old
-    S_old = {int(i): float(heuristic_res.S[int(i)]) for i in I}
-    C_old = {int(i): float(heuristic_res.C[int(i)]) for i in I}
-
-    # x_old / y_old (string key format "i,k")
-    x_old = {}
-    y_old = {}
-    for i in I:
-        m = int(heuristic_res.assign_machine[i])
-        l = int(heuristic_res.assign_station[i])
-        x_old[_tuple_key_str(i, m)] = 1
-        y_old[_tuple_key_str(i, l)] = 1
-
-    # job_of
-    job_of = {}
-    for j, ops in data["O_j"].items():
-        for op in ops:
-            job_of[int(op)] = int(j)
-
-    schedule = []
-    for i in I:
-        schedule.append({
-            "op_id": int(i),
-            "op_label": str(int(i)),
-            "job_id": int(job_of.get(int(i), -1)),
-            "start": float(heuristic_res.S[int(i)]),
-            "finish": float(heuristic_res.C[int(i)]),
-            "machine": int(heuristic_res.assign_machine[int(i)]),
-            "station": int(heuristic_res.assign_station[int(i)]),
-        })
-
-    schedule.sort(key=lambda r: (float(r["start"]), float(r["finish"]), int(r["op_id"])))
-
-    return {
-        "plan_start_iso": plan_start_iso,
-        "plan_calendar": plan_calendar,
-        "scenario_name": scenario_name,
-        "objective": {"T_max": float(heuristic_res.T_max), "C_max": float(heuristic_res.C_max)},
-        "schedule": schedule,
-        "S_old": S_old,
-        "C_old": C_old,
-        "x_old": x_old,
-        "y_old": y_old,
+    out = {
+        "scenario": _get_scenario_name(sc),
+        "plan_start_iso": _get_plan_start_iso(sc),
+        "objective": {"T_max": float(res.T_max), "C_max": float(res.C_max)},
+        "schedule": [
+            {
+                "op_id": int(i),
+                "op_label": str(i),
+                "job_id": int(data["job_of"].get(int(i), -1)) if "job_of" in data else -1,
+                "start": float(res.S[int(i)]),
+                "finish": float(res.C[int(i)]),
+                "machine": int(res.assign_machine.get(int(i))) if int(i) in res.assign_machine else None,
+                "station": int(res.assign_station.get(int(i))) if int(i) in res.assign_station else None,
+            }
+            for i in sorted([int(x) for x in data["I"]], key=lambda ii: (res.S[ii], res.C[ii], ii))
+        ],
+        "note": "Baseline generated from run_reschedule.py (missing baseline_solution.json).",
     }
 
+    _save_json(bp, out)
+    print(f"✅ Baseline saved: {bp}")
+    return out
+
 
 # ==========================================================
-#  MAIN
+#  Main
 # ==========================================================
 
 def main():
     if len(sys.argv) < 2:
-        print("Usage: python run_reschedule_open_source.py scenarios/<scenario>.json")
+        print("Usage: py run_reschedule.py scenarios/<scenario.json>")
         sys.exit(1)
 
     scenario_path = sys.argv[1]
-    scn = _load_json(scenario_path)
-    workdir = os.path.dirname(os.path.abspath(__file__))
+    if not os.path.exists(scenario_path):
+        print(f"❌ Scenario file not found: {scenario_path}")
+        sys.exit(1)
 
-    scenario_name = _pick_scenario_name(scn, scenario_path)
-    plan_start_iso = scn.get("plan_start_iso", "2025-12-18T05:00:00+00:00")
-    plan_calendar = scn.get("plan_calendar", {"utc_offset": "+03:00"})
+    base_dir = os.path.dirname(os.path.abspath(scenario_path))
+    sc = _get_scenario_dict(scenario_path)
 
-    # Baseline overrides (data üretirken)
-    baseline_overrides = scn.get("baseline_overrides", {}) or {}
-    # Reschedule overrides (t0 sonrası etkili kabul edip data’ya reschedule aşamasında uyguluyoruz)
-    reschedule_overrides = scn.get("overrides", {}) or {}
+    print(f"scenario: {_get_scenario_name(sc)}")
+    plan_start_iso = _get_plan_start_iso(sc)
+    if plan_start_iso:
+        print(f"plan_start_iso: {plan_start_iso}")
 
-    # -------------------------
-    # DATA SOURCE
-    # -------------------------
-    # 1) Eğer senaryo JSON top-level "data" içeriyorsa onu kullan
-    # 2) Yoksa make_base_data(overrides=baseline_overrides)
-    if "data" in scn and isinstance(scn["data"], dict):
-        data_baseline = scn["data"]
-        # baseline_overrides varsa bunun üstüne uygula (opsiyonel ama tutarlı)
-        if baseline_overrides:
-            data_baseline = _apply_overrides_to_data(data_baseline, baseline_overrides)
+    # baseline required
+    baseline = ensure_baseline(sc, scenario_path)
+
+    # base data
+    overrides = _get_overrides(sc)
+    if isinstance(sc.get("data"), dict):
+        data_base = sc["data"]
     else:
-        data_baseline = make_base_data(overrides=baseline_overrides)
+        data_base = make_base_data(overrides=overrides)
 
-    tag = _scenario_tag(scn, scenario_path)
-    baseline_out, reschedule_out, canonical_base, canonical_res = _pick_outputs(scn, workdir)
+    # disruptions
+    unavailable_machines, unavailable_stations = _get_disruptions(sc)
 
-    # ==========================================================
-    # BASELINE (HeuristicBaseModel)
-    # ==========================================================
-    data_for_heur = _adapt_data_for_heuristic(data_baseline)
-    k1 = float(scn.get("k1", 2.0))
-    base_res = run_heuristic(data_for_heur, k1=k1)
+    # urgent payload
+    urgent_payload = _get_urgent_payload(sc, base_dir)
 
-    baseline = _baseline_to_solution_json(
-        plan_start_iso=plan_start_iso,
-        plan_calendar=plan_calendar,
-        scenario_name=scenario_name,
-        data=data_for_heur,  # heuristic hangi data ile çalıştıysa onu baz al
-        heuristic_res=base_res
-    )
+    # reschedule time
+    t0 = None
+    t_now_iso = _get_t_now_iso(sc)
+    if plan_start_iso and t_now_iso:
+        try:
+            t0 = _compute_t0_from_iso(plan_start_iso, t_now_iso)
+            print(f"t_now_iso: {t_now_iso}  => t0(hours): {t0:.3f}")
+        except Exception as e:
+            print(f"⚠️ Could not parse ISO times for t0. ({e})")
 
-    _save_json(baseline_out, baseline)
-    _save_json(canonical_base, baseline)
+    mode = _get_mode(sc)
+    k1 = _get_k1(sc)
 
-    print(f"✅ Baseline saved: {baseline_out}")
-    print("scenario:", scenario_name)
-    print("plan_start_iso (UTC):", baseline["plan_start_iso"])
-    print("objective:", baseline["objective"])
-
-    # ==========================================================
-    # RESCHEDULE DATA (baseline + reschedule overrides)
-    # ==========================================================
-    data_reschedule = _apply_overrides_to_data(data_baseline, reschedule_overrides)
-    # reschedule tarafında da p_flag_j uyumu gerekebilir
-    data_reschedule = _adapt_data_for_heuristic(data_reschedule)
-
-    # ==========================================================
-    # RESCHEDULE (Open-source heuristic)
-    # ==========================================================
-    unavailable_machines, unavailable_stations = _pick_disruptions(scn)
-    mode = _pick_mode(scn)  # tercih 1 => continue
-
-    urgent_payload = _pick_urgent_payload(scn, workdir)
-    if not urgent_payload:
-        urgent_payload = None
-
-    res = solve_reschedule_open_source(
-        data_base=data_reschedule,
+    # solve reschedule (ONE ENGINE)
+    res = solve_reschedule(
+        data_base=data_base,
         old_solution=baseline,
         urgent_payload=urgent_payload,
         unavailable_machines=unavailable_machines,
         unavailable_stations=unavailable_stations,
+        t0_override=t0,
+        k1=k1,
         mode=mode,
     )
 
-    res["scenario_name"] = scenario_name
-    res["mode"] = mode
-    res["disruptions"] = {
-        "unavailable_machines": unavailable_machines,
-        "unavailable_stations": unavailable_stations
-    }
-    res["applied_overrides_at_reschedule"] = reschedule_overrides
+    out_path = _reschedule_path()
+    _save_json(out_path, res)
+    print(f"✅ Reschedule saved: {out_path}")
+    print(f"objective: {res.get('objective')}")
 
-    _save_json(reschedule_out, res)
-    _save_json(canonical_res, res)
+    # plots (baseline + reschedule)
+    gantt_dir = _gantt_dir_for_scenario(sc)
+    os.makedirs(gantt_dir, exist_ok=True)
 
-    print(f"✅ Reschedule saved: {reschedule_out}")
-    print("t0:", res.get("t0"))
-    print("objective:", res.get("objective"))
-
-    _run_plotter_and_archive(tag=tag, workdir=workdir)
-
+    print("📊 Generating Gantt charts...")
+    try:
+        # baseline + reschedule plotter
+        plotter = os.path.join(_get_this_dir(), "plot_gantt_all.py")
+        if os.path.exists(plotter):
+            subprocess.run([sys.executable, plotter, gantt_dir], check=False)
+        else:
+            # fallback baseline plotter
+            plotter2 = os.path.join(_get_this_dir(), "plot_gantt_baseline.py")
+            if os.path.exists(plotter2):
+                subprocess.run([sys.executable, plotter2, gantt_dir], check=False)
+    except Exception as e:
+        print(f"⚠️ Plot generation failed: {e}")
 
 if __name__ == "__main__":
     main()

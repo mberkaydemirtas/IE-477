@@ -840,3 +840,8 @@ def solve_reschedule(
         "schedule": schedule,
         "note": "Reschedule solved by same engine: HeuristicBaseModel.run_heuristic"
     }
+# ----------------------------------------------------------
+# Backward-compatible alias (older runners may import this)
+# ----------------------------------------------------------
+def solve_reschedule_open_source(*args, **kwargs):
+    return solve_reschedule(*args, **kwargs)
