@@ -3,6 +3,7 @@
 
 import json
 import os
+import re
 import matplotlib.pyplot as plt
 from matplotlib.patches import Patch
 
@@ -30,7 +31,32 @@ def _make_job_color_map(schedule):
     return job_color
 
 
-def _plot_gantt(schedule, key: str, title: str, out_png: str, t0: float | None = None):
+def _extract_scenario_id(meta: dict) -> str:
+    """
+    Attempts to infer scenario id (e.g., '04') from meta fields:
+      - meta['scenario'] like 'scenario_04_urgent_job_shock.json'
+      - meta['scenario_id'] like 4 / "04"
+      - meta['scenario_name'] like 'Scenario 04 — ...'
+    Fallback: 'xx'
+    """
+    for key in ["scenario_id", "scenario", "scenario_name"]:
+        v = meta.get(key, None)
+        if not v:
+            continue
+        s = str(v)
+        m = re.search(r"\b(\d{1,2})\b", s)
+        if m:
+            return m.group(1).zfill(2)
+
+        # scenario_04 pattern
+        m2 = re.search(r"scenario[_\- ]*(\d+)", s, flags=re.IGNORECASE)
+        if m2:
+            return m2.group(1).zfill(2)
+
+    return "xx"
+
+
+def _plot_gantt(schedule, key: str, title: str, out_png: str, t0=None):
     rows = []
     for r in schedule:
         if key not in r:
@@ -49,11 +75,8 @@ def _plot_gantt(schedule, key: str, title: str, out_png: str, t0: float | None =
         return
 
     idx = {res: i for i, res in enumerate(resources)}
-
-    # consistent colors per job_id
     job_color = _make_job_color_map(rows)
 
-    # Sort bars by resource then start
     rows.sort(key=lambda r: (idx.get(r.get(key), 10**9), float(r["start"])))
 
     fig, ax = plt.subplots(figsize=(16, 7))
@@ -71,28 +94,32 @@ def _plot_gantt(schedule, key: str, title: str, out_png: str, t0: float | None =
             continue
 
         jid = int(r.get("job_id", -1))
-        color = job_color.get(jid, None)
+        color = job_color.get(jid, (0.75, 0.75, 0.75, 1.0))
 
-        ax.barh(y, dur, left=start, height=0.6, color=color)
+        ax.barh(
+            y, dur, left=start, height=0.6,
+            color=color, edgecolor="black", linewidth=0.6
+        )
 
         label = str(r.get("op_label", r.get("op_id", "")))
-        ax.text(start + dur * 0.02, y, label, va="center", fontsize=8)
+        ax.text(start + dur * 0.02, y, label, va="center", fontsize=8, color="black")
 
     ax.set_yticks(range(len(resources)))
     ax.set_yticklabels([str(r) for r in resources])
     ax.set_xlabel("Time (hours)")
     ax.set_title(title)
-    ax.grid(True, axis="x", linestyle="--", linewidth=0.5)
+    ax.grid(True, axis="x", linestyle="--", linewidth=0.5, alpha=0.6)
 
-    # t0 marker line (reschedule moment)
     if t0 is not None:
-        ax.axvline(x=float(t0), linestyle="--", linewidth=2.0)
-        ax.text(float(t0), len(resources) - 0.2, "t0 (reschedule)", rotation=90,
-                va="top", ha="right", fontsize=9)
+        try:
+            t0f = float(t0)
+            ax.axvline(t0f, linestyle="--", linewidth=2.0)
+            ax.text(t0f, len(resources) - 0.2, "t0", rotation=90, va="top", ha="right")
+        except Exception:
+            pass
 
-    # legend (Color -> Job)
     legend_jobs = sorted([j for j in job_color.keys() if j >= 0])
-    handles = [Patch(facecolor=job_color[j], edgecolor="none", label=f"Job {j}") for j in legend_jobs]
+    handles = [Patch(facecolor=job_color[j], edgecolor="black", label=f"Job {j}") for j in legend_jobs]
     if handles:
         ax.legend(handles=handles, loc="center left", bbox_to_anchor=(1.01, 0.5), title="Color → Job")
 
@@ -104,31 +131,62 @@ def _plot_gantt(schedule, key: str, title: str, out_png: str, t0: float | None =
 
 
 def main():
-    base_path = "baseline_solution.json"
-    res_path = "reschedule_solution.json"
+    workdir = os.path.dirname(os.path.abspath(__file__))
+
+    base_path = os.path.join(workdir, "baseline_solution.json")
+    res_path = os.path.join(workdir, "reschedule_solution.json")
 
     if not os.path.exists(base_path):
-        raise FileNotFoundError("Missing baseline_solution.json")
-    if not os.path.exists(res_path):
-        raise FileNotFoundError("Missing reschedule_solution.json")
+        raise FileNotFoundError(f"Missing baseline_solution.json at: {base_path}")
 
     base = _load(base_path)
-    res = _load(res_path)
-
     base_sched = base.get("schedule", [])
-    res_sched = res.get("schedule", [])
 
-    t0 = res.get("t0", None)
-    try:
-        t0 = float(t0) if t0 is not None else None
-    except Exception:
-        t0 = None
+    # scenario id (nice output folder)
+    sid = _extract_scenario_id(base)
 
-    _plot_gantt(base_sched, "machine", "Baseline — Machine-wise Gantt", "gantt_machine_baseline.png", t0=None)
-    _plot_gantt(base_sched, "station", "Baseline — Station-wise Gantt", "gantt_station_baseline.png", t0=None)
+    # output folder
+    outdir = os.path.join(workdir, f"scenario{sid}_gantts")
+    os.makedirs(outdir, exist_ok=True)
 
-    _plot_gantt(res_sched, "machine", "Reschedule — Machine-wise Gantt", "gantt_machine_reschedule.png", t0=t0)
-    _plot_gantt(res_sched, "station", "Reschedule — Station-wise Gantt", "gantt_station_reschedule.png", t0=t0)
+    # baseline plots
+    _plot_gantt(
+        base_sched,
+        "machine",
+        f"Scenario {sid} — Baseline (Machine Gantt)",
+        os.path.join(outdir, "gantt_machine_baseline.png"),
+        t0=None
+    )
+    _plot_gantt(
+        base_sched,
+        "station",
+        f"Scenario {sid} — Baseline (Station Gantt)",
+        os.path.join(outdir, "gantt_station_baseline.png"),
+        t0=None
+    )
+
+    # reschedule plots (optional)
+    if os.path.exists(res_path):
+        res = _load(res_path)
+        res_sched = res.get("schedule", [])
+        t0 = res.get("t0", None)
+
+        _plot_gantt(
+            res_sched,
+            "machine",
+            f"Scenario {sid} — Reschedule (Machine Gantt)",
+            os.path.join(outdir, f"gantt_machine_reschedule_s{sid}.png"),
+            t0=t0
+        )
+        _plot_gantt(
+            res_sched,
+            "station",
+            f"Scenario {sid} — Reschedule (Station Gantt)",
+            os.path.join(outdir, f"gantt_station_reschedule_s{sid}.png"),
+            t0=t0
+        )
+    else:
+        print(f"ℹ️ reschedule_solution.json not found (ok). Only baseline plots were generated.")
 
 
 if __name__ == "__main__":
