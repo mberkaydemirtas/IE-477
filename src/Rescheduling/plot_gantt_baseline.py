@@ -39,19 +39,22 @@ def _extract_scenario_id(meta: dict) -> str:
       - meta['scenario_name'] like 'Scenario 04 — ...'
     Fallback: 'xx'
     """
+    # Prefer explicit numeric patterns
     for key in ["scenario_id", "scenario", "scenario_name"]:
         v = meta.get(key, None)
         if not v:
             continue
         s = str(v)
-        m = re.search(r"\b(\d{1,2})\b", s)
-        if m:
-            return m.group(1).zfill(2)
 
         # scenario_04 pattern
         m2 = re.search(r"scenario[_\- ]*(\d+)", s, flags=re.IGNORECASE)
         if m2:
             return m2.group(1).zfill(2)
+
+        # "Scenario 04" or "04" inside string
+        m = re.search(r"\b(\d{1,2})\b", s)
+        if m:
+            return m.group(1).zfill(2)
 
     return "xx"
 
@@ -77,6 +80,7 @@ def _plot_gantt(schedule, key: str, title: str, out_png: str, t0=None):
     idx = {res: i for i, res in enumerate(resources)}
     job_color = _make_job_color_map(rows)
 
+    # Sort bars by resource then start
     rows.sort(key=lambda r: (idx.get(r.get(key), 10**9), float(r["start"])))
 
     fig, ax = plt.subplots(figsize=(16, 7))
@@ -110,6 +114,7 @@ def _plot_gantt(schedule, key: str, title: str, out_png: str, t0=None):
     ax.set_title(title)
     ax.grid(True, axis="x", linestyle="--", linewidth=0.5, alpha=0.6)
 
+    # t0 marker line (reschedule moment)
     if t0 is not None:
         try:
             t0f = float(t0)
@@ -118,6 +123,7 @@ def _plot_gantt(schedule, key: str, title: str, out_png: str, t0=None):
         except Exception:
             pass
 
+    # legend (Color -> Job)
     legend_jobs = sorted([j for j in job_color.keys() if j >= 0])
     handles = [Patch(facecolor=job_color[j], edgecolor="black", label=f"Job {j}") for j in legend_jobs]
     if handles:
@@ -139,17 +145,15 @@ def main():
     if not os.path.exists(base_path):
         raise FileNotFoundError(f"Missing baseline_solution.json at: {base_path}")
 
+    # --- baseline (must succeed)
     base = _load(base_path)
     base_sched = base.get("schedule", [])
 
-    # scenario id (nice output folder)
     sid = _extract_scenario_id(base)
 
-    # output folder
     outdir = os.path.join(workdir, f"scenario{sid}_gantts")
     os.makedirs(outdir, exist_ok=True)
 
-    # baseline plots
     _plot_gantt(
         base_sched,
         "machine",
@@ -165,28 +169,41 @@ def main():
         t0=None
     )
 
-    # reschedule plots (optional)
-    if os.path.exists(res_path):
-        res = _load(res_path)
-        res_sched = res.get("schedule", [])
-        t0 = res.get("t0", None)
+    # --- reschedule (optional + robust)
+    if not os.path.exists(res_path):
+        print("ℹ️ reschedule_solution.json not found (ok). Only baseline plots were generated.")
+        return
 
-        _plot_gantt(
-            res_sched,
-            "machine",
-            f"Scenario {sid} — Reschedule (Machine Gantt)",
-            os.path.join(outdir, f"gantt_machine_reschedule_s{sid}.png"),
-            t0=t0
-        )
-        _plot_gantt(
-            res_sched,
-            "station",
-            f"Scenario {sid} — Reschedule (Station Gantt)",
-            os.path.join(outdir, f"gantt_station_reschedule_s{sid}.png"),
-            t0=t0
-        )
-    else:
-        print(f"ℹ️ reschedule_solution.json not found (ok). Only baseline plots were generated.")
+    try:
+        res = _load(res_path)
+    except json.JSONDecodeError as e:
+        print(f"⚠️ reschedule_solution.json invalid JSON. Skipping reschedule plots. ({e})")
+        return
+    except Exception as e:
+        print(f"⚠️ Could not read reschedule_solution.json. Skipping reschedule plots. ({e})")
+        return
+
+    res_sched = res.get("schedule", [])
+    t0 = res.get("t0", None)
+
+    if not res_sched:
+        print("ℹ️ reschedule_solution.json loaded but has no 'schedule'. Skipping reschedule plots.")
+        return
+
+    _plot_gantt(
+        res_sched,
+        "machine",
+        f"Scenario {sid} — Reschedule (Machine Gantt)",
+        os.path.join(outdir, f"gantt_machine_reschedule_s{sid}.png"),
+        t0=t0
+    )
+    _plot_gantt(
+        res_sched,
+        "station",
+        f"Scenario {sid} — Reschedule (Station Gantt)",
+        os.path.join(outdir, f"gantt_station_reschedule_s{sid}.png"),
+        t0=t0
+    )
 
 
 if __name__ == "__main__":
