@@ -4,21 +4,14 @@ HeuristicBaseModel.py
 
 Welding Shop Scheduling – Giffler–Thompson (GT) + ATC Heuristic (BASE + RESCHED SUPPORT)
 
-DATA-AGNOSTIC:
-    res = run_heuristic(
-        data,
-        k1=2.0,
-        fixed_ops=None,
-        start_time_floor=0.0,
-        unavailable_machines=None,
-        unavailable_stations=None,
-    )
+ADD-ON (Urgent priority):
+- If data contains "urgent_job_id" (int), ATC priority is multiplied by "urgent_weight" (default 25.0)
+  for operations of that urgent job. This makes urgent ops preferred whenever they are startable.
 
-RESCHED SUPPORT ADDED:
+RESCHED SUPPORT:
 - fixed_ops: pre-scheduled ops that must remain at given start/finish and block their resources until finish
 - start_time_floor: no non-fixed op can start before this (use t0)
 - unavailable resources: prevent new assignments to those machines/stations
-- ROBUST C_weld: max completion among job ops (safe for remainder/split ops)
 
 Still report-aligned:
 - GT pivot: among STARTABLE at time t, pick min earliest completion
@@ -26,7 +19,7 @@ Still report-aligned:
 - ATC within conflict
 - Batch scheduling at fixed t (parallelism fix)
 
-Python 3.9 compatible (no `X | None` type syntax).
+Python 3.9 compatible.
 """
 
 import math
@@ -172,6 +165,14 @@ def run_heuristic(
 
     job_of = get_job_of_map(J, O_j)
 
+    # Urgent boosting
+    urgent_job_id = data.get("urgent_job_id", None)
+    try:
+        urgent_job_id = int(urgent_job_id) if urgent_job_id is not None else None
+    except Exception:
+        urgent_job_id = None
+    urgent_weight = float(data.get("urgent_weight", 25.0))
+
     # Average processing time for ATC scaling
     all_p = [float(p_im[(int(i), int(m))]) for i in I for m in M_i[i]]
     p_bar = (sum(all_p) / len(all_p)) if all_p else 1.0
@@ -235,7 +236,13 @@ def run_heuristic(
         p_i = float(p_im[(int(i), int(m_earliest))])
         slack = max(float(d_j[j]) - p_i - t_now, 0.0)
         denom = max(k1 * p_bar, eps)
-        return (1.0 / max(p_i, eps)) * math.exp(-slack / denom)
+        base = (1.0 / max(p_i, eps)) * math.exp(-slack / denom)
+
+        # Boost urgent job ops (only if configured)
+        if urgent_job_id is not None and int(j) == int(urgent_job_id):
+            base *= max(1.0, urgent_weight)
+
+        return base
 
     def preds_done(i: int) -> bool:
         return all(int(h) in C for h in Pred_i.get(i, []))
@@ -423,66 +430,3 @@ def run_heuristic(
         T_max=float(T_max),
         C_max=float(C_max)
     )
-
-
-# -------------------------------
-# Feasibility checker
-# -------------------------------
-
-def check_heuristic_solution(data: Dict[str, Any], res: HeuristicResult, tol: float = 1e-6) -> None:
-    J = data["J"]
-    I = [int(x) for x in data["I"]]
-    O_j = data["O_j"]
-    M = data["M"]
-    L = data["L"]
-    Pred_i = data["Pred_i"]
-    r_j = data["r_j"]
-    beta_i = data["beta_i"]
-    L_small = set(int(x) for x in data["L_small"])
-
-    S, C = res.S, res.C
-    am, al = res.assign_machine, res.assign_station
-    job_of = get_job_of_map(J, O_j)
-
-    # precedence
-    for i in I:
-        for h in Pred_i.get(i, []):
-            if S[i] + tol < C[int(h)]:
-                raise AssertionError(
-                    f"Precedence violated: op {i} starts {S[i]:.3f} < C[{h}]={C[int(h)]:.3f}"
-                )
-
-    # release
-    for i in I:
-        j = job_of[i]
-        if S[i] + tol < float(r_j[j]):
-            raise AssertionError(
-                f"Release violated: op {i} starts {S[i]:.3f} < r_j[{j}]={r_j[j]:.3f}"
-            )
-
-    # machine non-overlap
-    for m in M:
-        ops_m = [i for i in I if am.get(i) == m]
-        for a in range(len(ops_m)):
-            for b in range(a + 1, len(ops_m)):
-                i, h = ops_m[a], ops_m[b]
-                if not (C[i] <= S[h] + tol or C[h] <= S[i] + tol):
-                    raise AssertionError(f"Machine {m} overlap: ops {i} and {h}")
-
-    # station non-overlap
-    for l in L:
-        ops_l = [i for i in I if al.get(i) == l]
-        for a in range(len(ops_l)):
-            for b in range(a + 1, len(ops_l)):
-                i, h = ops_l[a], ops_l[b]
-                if not (C[i] <= S[h] + tol or C[h] <= S[i] + tol):
-                    raise AssertionError(f"Station {l} overlap: ops {i} and {h}")
-
-    # big-station constraint
-    for i in I:
-        if int(beta_i.get(i, 0)) == 1 and al[i] in L_small:
-            raise AssertionError(
-                f"Big-station violated: op {i} assigned to small station {al[i]}"
-            )
-
-    print("All heuristic feasibility checks passed.")

@@ -1,10 +1,28 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 
+"""
+run_baseline.py
+
+Creates a baseline schedule and saves it to a scenario-specific filename.
+
+Naming rules:
+1) If scenario JSON provides "baseline_output", use it exactly.
+2) Else, try to derive a scenario id:
+   - Prefer scn["scenario_id"] if present
+   - Else parse from filename like "scenario_04_..." or "scenario04_..."
+   - Else parse first standalone 1–2 digit number from scenario_name/file
+3) If an id is found -> "baseline_solution_{id:02d}.json"
+4) Else fallback -> "baseline_solution.json"
+
+This fixes the issue where Scenario 04 was overwriting/using baseline_solution.json
+while Scenario 03 used baseline_solution_03.json.
+"""
+
 import json
 import os
+import re
 import sys
-import shutil
 import subprocess
 from datetime import datetime, timezone
 
@@ -15,92 +33,126 @@ def _load_json(path: str) -> dict:
     with open(path, "r", encoding="utf-8") as f:
         return json.load(f)
 
-
-def _save_json(path: str, obj: dict):
+def _save_json_atomic(path: str, obj: dict):
     folder = os.path.dirname(path)
     if folder:
         os.makedirs(folder, exist_ok=True)
-    with open(path, "w", encoding="utf-8") as f:
+    tmp = path + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as f:
         json.dump(obj, f, indent=2, ensure_ascii=False)
+    os.replace(tmp, path)
+
+def _deep_merge(a: dict, b: dict) -> dict:
+    out = dict(a)
+    for k, v in (b or {}).items():
+        if k in out and isinstance(out[k], dict) and isinstance(v, dict):
+            out[k] = _deep_merge(out[k], v)
+        else:
+            out[k] = v
+    return out
 
 
-def _scenario_tag(scn: dict, scenario_path: str) -> str:
+def _scenario_name(scn: dict, scenario_path: str) -> str:
+    return scn.get("scenario_name") or scn.get("name") or os.path.basename(scenario_path)
+
+def _infer_scenario_id(scn: dict, scenario_path: str) -> int:
+    """
+    Best-effort inference of scenario id as an integer.
+    Returns -1 if not found.
+    """
     sid = scn.get("scenario_id", None)
     if sid is not None:
-        s = str(sid).strip()
-        return f"s{s.zfill(2)}" if s.isdigit() else f"s_{s}"
+        try:
+            return int(sid)
+        except Exception:
+            pass
 
-    base = os.path.basename(scenario_path).replace(".json", "")
-    parts = base.split("_")
-    for p in parts:
-        if p.isdigit():
-            return f"s{p.zfill(2)}"
+    base = os.path.basename(scenario_path)
+    # scenario_04_xxx.json or scenario04_xxx.json
+    m = re.search(r"scenario[_\- ]*(\d+)", base, flags=re.IGNORECASE)
+    if m:
+        try:
+            return int(m.group(1))
+        except Exception:
+            pass
 
-    ts = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
-    return f"s_{ts}"
+    # try scenario_name / filename any 1-2 digit token
+    s = _scenario_name(scn, scenario_path)
+    m2 = re.search(r"\b(\d{1,2})\b", s)
+    if m2:
+        try:
+            return int(m2.group(1))
+        except Exception:
+            pass
 
+    return -1
 
-def _run_baseline_plotter_and_archive(tag: str, workdir: str):
-    plot_script = os.path.join(workdir, "plot_gantt_baseline.py")
-    if not os.path.exists(plot_script):
-        print(f"⚠️ plot_gantt_baseline.py not found at: {plot_script}")
-        return
+def _pick_baseline_output_name(scn: dict, scenario_path: str) -> str:
+    if scn.get("baseline_output"):
+        return str(scn["baseline_output"]).strip()
 
-    print("📊 Generating BASELINE Gantt charts...")
-    subprocess.run([sys.executable, plot_script], cwd=workdir, check=True)
+    sid = _infer_scenario_id(scn, scenario_path)
+    if sid >= 0:
+        return f"baseline_solution_{sid:02d}.json"
 
-    outputs = ["gantt_machine_baseline.png", "gantt_station_baseline.png"]
-    for fn in outputs:
-        src = os.path.join(workdir, fn)
-        if os.path.exists(src):
-            name, ext = os.path.splitext(fn)
-            dst = os.path.join(workdir, f"{name}_{tag}{ext}")
-            shutil.copyfile(src, dst)
-            print(f"✅ Saved: {dst}")
+    return "baseline_solution.json"
 
 
 def main():
     if len(sys.argv) < 2:
-        print("Usage (Windows): py run_baseline.py scenarios/<scenario>.json")
-        print("Usage (Mac/Linux): python3 run_baseline.py scenarios/<scenario>.json")
+        print("Usage: py run_baseline.py scenarios/<scenario>.json")
         sys.exit(1)
 
     scenario_path = sys.argv[1]
+    if not os.path.exists(scenario_path):
+        print(f"❌ Scenario file not found: {scenario_path}")
+        sys.exit(1)
+
     scn = _load_json(scenario_path)
 
     workdir = os.path.dirname(os.path.abspath(__file__))
+    scenario_name = _scenario_name(scn, scenario_path)
 
-    scenario_name = scn.get("scenario_name", os.path.basename(scenario_path))
-    plan_start_iso = scn.get("plan_start_iso", "2025-12-18T05:00:00+00:00")
+    # dynamic start time (baseline creation time)
+    plan_start_iso = datetime.now(timezone.utc).isoformat()
     plan_calendar = scn.get("plan_calendar", {"utc_offset": "+03:00"})
 
-    # ✅ IMPORTANT CHANGE:
-    # - scenario may NOT contain top-level "data"
-    # - if "data" missing => default base data
-    # - apply "overrides" if exists
-    overrides = scn.get("overrides", {}) or {}
-    data = None
-    if isinstance(scn.get("data", None), dict):
-        # if provided, merge with default base by override semantics
-        base = make_base_data(overrides=overrides)
-        data = dict(base)
-        data.update(scn["data"])
+    overrides = scn.get("base_overrides", {}) or {}
+    base = make_base_data(overrides=overrides)
+
+
+    # allow optional top-level data patch
+    if isinstance(scn.get("data"), dict):
+        data = _deep_merge(base, scn["data"])
     else:
-        data = make_base_data(overrides=overrides)
+        data = base
 
-    baseline = solve_baseline(data, plan_start_iso=plan_start_iso, plan_calendar=plan_calendar)
+    baseline = solve_baseline(
+        data,
+        plan_start_iso=plan_start_iso,
+        plan_calendar=plan_calendar,
+        k1=float(scn.get("k1", 2.0)),
+    )
     baseline["scenario_name"] = scenario_name
+    baseline["scenario_file"] = os.path.basename(scenario_path)
+    baseline["baseline_run_iso_utc"] = datetime.now(timezone.utc).isoformat()
 
-    baseline_path = os.path.join(workdir, "baseline_solution.json")
-    _save_json(baseline_path, baseline)
+    # output name support (fixed: auto scenario id naming)
+    out_name = _pick_baseline_output_name(scn, scenario_path)
+    out_path = os.path.join(workdir, out_name)
 
-    print(f"✅ Baseline saved: {baseline_path}")
+    _save_json_atomic(out_path, baseline)
+
+    print(f"✅ Baseline saved: {out_path}")
     print("scenario:", scenario_name)
     print("plan_start_iso:", baseline["plan_start_iso"])
     print("objective:", baseline["objective"])
 
-    tag = _scenario_tag(scn, scenario_path)
-    _run_baseline_plotter_and_archive(tag=tag, workdir=workdir)
+    # baseline plots (optional)
+    plot_script = os.path.join(workdir, "plot_gantt_baseline.py")
+    if os.path.exists(plot_script):
+        print("📊 Generating BASELINE Gantt charts...")
+        subprocess.run([sys.executable, plot_script, out_path], cwd=workdir, check=False)
 
 
 if __name__ == "__main__":

@@ -3,6 +3,7 @@
   "baseline_output": "baseline_solution_06.json",
   "reschedule_output": "reschedule_solution_06.json",
   "overrides": {
+    "r_j": { "8": 0.0 },
     "d_j": {
       "8": 2.5,
       "3": 100.0

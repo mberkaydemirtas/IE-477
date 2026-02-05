@@ -1,185 +1,76 @@
 {
-  "t0": 40.0,
+  "t0": 17.21820045138889,
+  "t_now_iso": null,
+  "mode": "optimize",
   "sets": {
     "I_done": [
       1,
       2,
-      3,
       4,
       5,
       6,
-      7,
       8,
+      13,
+      15,
+      17,
+      20
+    ],
+    "I_run": [
+      3,
       9,
       10,
+      14,
+      16,
+      19,
+      22,
+      28
+    ],
+    "I_free": [
+      7,
       11,
       12,
-      13,
-      14,
-      15,
-      16,
-      17,
       18,
-      19,
-      20,
-      22,
+      21,
       23,
       24,
       25,
-      28,
-      29
-    ],
-    "I_run": [
-      21,
-<<<<<<< Updated upstream
-<<<<<<< Updated upstream
-<<<<<<< Updated upstream
-<<<<<<< Updated upstream
-=======
-=======
->>>>>>> Stashed changes
-=======
->>>>>>> Stashed changes
-=======
->>>>>>> Stashed changes
-<<<<<<< HEAD
-      26
-    ],
-    "I_free": [
-      27,
-=======
-<<<<<<< Updated upstream
-<<<<<<< Updated upstream
-<<<<<<< Updated upstream
->>>>>>> Stashed changes
-=======
->>>>>>> Stashed changes
-=======
->>>>>>> Stashed changes
-=======
->>>>>>> Stashed changes
       26,
-      27
-    ],
-    "I_free": [
-<<<<<<< Updated upstream
-<<<<<<< Updated upstream
-<<<<<<< Updated upstream
-<<<<<<< Updated upstream
-=======
->>>>>>> 669b3011590e580813f476cbf650bbac1c8256a7
->>>>>>> Stashed changes
-=======
->>>>>>> 669b3011590e580813f476cbf650bbac1c8256a7
->>>>>>> Stashed changes
-=======
->>>>>>> 669b3011590e580813f476cbf650bbac1c8256a7
->>>>>>> Stashed changes
-=======
->>>>>>> 669b3011590e580813f476cbf650bbac1c8256a7
->>>>>>> Stashed changes
+      27,
+      29,
       30
+    ],
+    "I_run_broken": [
+      3,
+      9,
+      14,
+      19
     ]
   },
   "objective": {
-<<<<<<< Updated upstream
-<<<<<<< Updated upstream
-<<<<<<< Updated upstream
-<<<<<<< Updated upstream
-    "T_max": 20.2,
-=======
-=======
->>>>>>> Stashed changes
-=======
->>>>>>> Stashed changes
-=======
->>>>>>> Stashed changes
-<<<<<<< HEAD
-    "T_max": 20.4,
-=======
-    "T_max": 20.2,
->>>>>>> 669b3011590e580813f476cbf650bbac1c8256a7
-<<<<<<< Updated upstream
-<<<<<<< Updated upstream
-<<<<<<< Updated upstream
->>>>>>> Stashed changes
-=======
->>>>>>> Stashed changes
-=======
->>>>>>> Stashed changes
-=======
->>>>>>> Stashed changes
-    "C_max": 63.0
+    "T_max": 39.781799548611104,
+    "C_max": 75.7817995486111
   },
   "urgent": {
     "job_id": 9,
-    "ops": [
-      31,
-      32
-    ],
-<<<<<<< Updated upstream
-<<<<<<< Updated upstream
-<<<<<<< Updated upstream
-<<<<<<< Updated upstream
-    "C_final": 62.2,
-    "T": 20.2,
-=======
-=======
->>>>>>> Stashed changes
-=======
->>>>>>> Stashed changes
-=======
->>>>>>> Stashed changes
-<<<<<<< HEAD
-    "C_final": 62.4,
-    "T": 20.4,
-=======
-    "C_final": 62.2,
-    "T": 20.2,
->>>>>>> 669b3011590e580813f476cbf650bbac1c8256a7
-<<<<<<< Updated upstream
-<<<<<<< Updated upstream
-<<<<<<< Updated upstream
->>>>>>> Stashed changes
-=======
->>>>>>> Stashed changes
-=======
->>>>>>> Stashed changes
-=======
->>>>>>> Stashed changes
-    "d": 42.0
+    "C_final": 39.31820045138889,
+    "T": 20.1,
+    "d": 19.21820045138889
   },
   "keep_decisions": {
-    "21": 0,
-<<<<<<< Updated upstream
-<<<<<<< Updated upstream
-<<<<<<< Updated upstream
-<<<<<<< Updated upstream
-    "26": 0,
-    "27": 1
-=======
-=======
->>>>>>> Stashed changes
-=======
->>>>>>> Stashed changes
-=======
->>>>>>> Stashed changes
-<<<<<<< HEAD
-    "26": 0
-=======
-    "26": 0,
-    "27": 1
->>>>>>> 669b3011590e580813f476cbf650bbac1c8256a7
-<<<<<<< Updated upstream
-<<<<<<< Updated upstream
-<<<<<<< Updated upstream
->>>>>>> Stashed changes
-=======
->>>>>>> Stashed changes
-=======
->>>>>>> Stashed changes
-=======
->>>>>>> Stashed changes
+    "3": 0,
+    "9": 0,
+    "10": 1,
+    "14": 0,
+    "16": 1,
+    "19": 0,
+    "22": 1,
+    "28": 1
+  },
+  "rem_map": {
+    "3": 33,
+    "9": 34,
+    "14": 35,
+    "19": 36
   },
   "schedule": [
     {
@@ -187,1323 +78,331 @@
       "op_label": "1",
       "job_id": 1,
       "start": 0.0,
-      "finish": 4.5,
-      "machine": 2,
-      "station": 1
-    },
-    {
-      "op_id": 2,
-      "op_label": "2",
-      "job_id": 1,
-      "start": 4.5,
-      "finish": 12.5,
-      "machine": 7,
-      "station": 1
-    },
-    {
-      "op_id": 3,
-      "op_label": "3",
-      "job_id": 1,
-      "start": 12.5,
-      "finish": 19.0,
-      "machine": 2,
+      "finish": 4.0,
+      "machine": 1,
       "station": 1
     },
     {
       "op_id": 4,
       "op_label": "4",
       "job_id": 2,
-      "start": 8.5,
-      "finish": 17.5,
+      "start": 2.0,
+      "finish": 10.5,
+      "machine": 4,
+      "station": 2
+    },
+    {
+      "op_id": 2,
+      "op_label": "2",
+      "job_id": 1,
+      "start": 4.0,
+      "finish": 11.0,
       "machine": 5,
-      "station": 4
-    },
-    {
-      "op_id": 5,
-      "op_label": "5",
-      "job_id": 2,
-<<<<<<< Updated upstream
-<<<<<<< Updated upstream
-<<<<<<< Updated upstream
-<<<<<<< Updated upstream
-      "start": 19.0,
-      "finish": 22.5,
-=======
-=======
->>>>>>> Stashed changes
-=======
->>>>>>> Stashed changes
-=======
->>>>>>> Stashed changes
-<<<<<<< HEAD
-      "start": 18.999999999314838,
-      "finish": 22.499999999314838,
-=======
-      "start": 19.0,
-      "finish": 22.5,
->>>>>>> 669b3011590e580813f476cbf650bbac1c8256a7
-<<<<<<< Updated upstream
-<<<<<<< Updated upstream
-<<<<<<< Updated upstream
->>>>>>> Stashed changes
-=======
->>>>>>> Stashed changes
-=======
->>>>>>> Stashed changes
-=======
->>>>>>> Stashed changes
-      "machine": 2,
-      "station": 3
-    },
-    {
-      "op_id": 6,
-      "op_label": "6",
-      "job_id": 2,
-<<<<<<< Updated upstream
-<<<<<<< Updated upstream
-<<<<<<< Updated upstream
-<<<<<<< Updated upstream
-      "start": 17.5,
-      "finish": 22.5,
-=======
-=======
->>>>>>> Stashed changes
-=======
->>>>>>> Stashed changes
-=======
->>>>>>> Stashed changes
-<<<<<<< HEAD
-      "start": 10.0,
-      "finish": 14.999999998863146,
-=======
-      "start": 17.5,
-      "finish": 22.5,
->>>>>>> 669b3011590e580813f476cbf650bbac1c8256a7
-<<<<<<< Updated upstream
-<<<<<<< Updated upstream
-<<<<<<< Updated upstream
->>>>>>> Stashed changes
-=======
->>>>>>> Stashed changes
-=======
->>>>>>> Stashed changes
-=======
->>>>>>> Stashed changes
-      "machine": 3,
-      "station": 8
-    },
-    {
-      "op_id": 7,
-      "op_label": "7",
-      "job_id": 2,
-<<<<<<< Updated upstream
-<<<<<<< Updated upstream
-<<<<<<< Updated upstream
-<<<<<<< Updated upstream
-      "start": 22.5,
-      "finish": 27.5,
-=======
-=======
->>>>>>> Stashed changes
-=======
->>>>>>> Stashed changes
-=======
->>>>>>> Stashed changes
-<<<<<<< HEAD
-      "start": 22.49999999817306,
-      "finish": 27.499999998173042,
-=======
-      "start": 22.5,
-      "finish": 27.5,
->>>>>>> 669b3011590e580813f476cbf650bbac1c8256a7
-<<<<<<< Updated upstream
-<<<<<<< Updated upstream
-<<<<<<< Updated upstream
->>>>>>> Stashed changes
-=======
->>>>>>> Stashed changes
-=======
->>>>>>> Stashed changes
-=======
->>>>>>> Stashed changes
-      "machine": 1,
-      "station": 3
+      "station": 1
     },
     {
       "op_id": 8,
       "op_label": "8",
       "job_id": 3,
       "start": 4.0,
-      "finish": 11.0,
-      "machine": 3,
-      "station": 7
-    },
-    {
-      "op_id": 9,
-      "op_label": "9",
-      "job_id": 3,
-      "start": 11.5,
-<<<<<<< Updated upstream
-<<<<<<< Updated upstream
-<<<<<<< Updated upstream
-<<<<<<< Updated upstream
-      "finish": 18.5,
-=======
-=======
->>>>>>> Stashed changes
-=======
->>>>>>> Stashed changes
-=======
->>>>>>> Stashed changes
-<<<<<<< HEAD
-      "finish": 18.499999999090203,
-=======
-      "finish": 18.5,
->>>>>>> 669b3011590e580813f476cbf650bbac1c8256a7
-<<<<<<< Updated upstream
-<<<<<<< Updated upstream
-<<<<<<< Updated upstream
->>>>>>> Stashed changes
-=======
->>>>>>> Stashed changes
-=======
->>>>>>> Stashed changes
-=======
->>>>>>> Stashed changes
-      "machine": 1,
-      "station": 3
-    },
-    {
-      "op_id": 10,
-      "op_label": "10",
-      "job_id": 3,
-<<<<<<< Updated upstream
-<<<<<<< Updated upstream
-<<<<<<< Updated upstream
-<<<<<<< Updated upstream
-=======
-=======
->>>>>>> Stashed changes
-=======
->>>>>>> Stashed changes
-=======
->>>>>>> Stashed changes
-<<<<<<< HEAD
-      "start": 11.5,
-      "finish": 16.5,
-      "machine": 5,
-      "station": 6
-=======
-<<<<<<< Updated upstream
-<<<<<<< Updated upstream
-<<<<<<< Updated upstream
->>>>>>> Stashed changes
-=======
->>>>>>> Stashed changes
-=======
->>>>>>> Stashed changes
-=======
->>>>>>> Stashed changes
-      "start": 11.0,
-      "finish": 16.5,
+      "finish": 12.5,
       "machine": 6,
-      "station": 7
-<<<<<<< Updated upstream
-<<<<<<< Updated upstream
-<<<<<<< Updated upstream
-<<<<<<< Updated upstream
-=======
->>>>>>> 669b3011590e580813f476cbf650bbac1c8256a7
->>>>>>> Stashed changes
-=======
->>>>>>> 669b3011590e580813f476cbf650bbac1c8256a7
->>>>>>> Stashed changes
-=======
->>>>>>> 669b3011590e580813f476cbf650bbac1c8256a7
->>>>>>> Stashed changes
-=======
->>>>>>> 669b3011590e580813f476cbf650bbac1c8256a7
->>>>>>> Stashed changes
-    },
-    {
-      "op_id": 11,
-      "op_label": "11",
-      "job_id": 3,
-<<<<<<< Updated upstream
-<<<<<<< Updated upstream
-<<<<<<< Updated upstream
-<<<<<<< Updated upstream
-=======
-=======
->>>>>>> Stashed changes
-=======
->>>>>>> Stashed changes
-=======
->>>>>>> Stashed changes
-<<<<<<< HEAD
-      "start": 18.499999999090203,
-      "finish": 22.499999999090235,
-      "machine": 1,
-      "station": 8
-=======
-<<<<<<< Updated upstream
-<<<<<<< Updated upstream
-<<<<<<< Updated upstream
->>>>>>> Stashed changes
-=======
->>>>>>> Stashed changes
-=======
->>>>>>> Stashed changes
-=======
->>>>>>> Stashed changes
-      "start": 18.5,
-      "finish": 22.5,
-      "machine": 1,
-      "station": 6
-<<<<<<< Updated upstream
-<<<<<<< Updated upstream
-<<<<<<< Updated upstream
-<<<<<<< Updated upstream
-=======
->>>>>>> 669b3011590e580813f476cbf650bbac1c8256a7
->>>>>>> Stashed changes
-=======
->>>>>>> 669b3011590e580813f476cbf650bbac1c8256a7
->>>>>>> Stashed changes
-=======
->>>>>>> 669b3011590e580813f476cbf650bbac1c8256a7
->>>>>>> Stashed changes
-=======
->>>>>>> 669b3011590e580813f476cbf650bbac1c8256a7
->>>>>>> Stashed changes
-    },
-    {
-      "op_id": 12,
-      "op_label": "12",
-      "job_id": 3,
-<<<<<<< Updated upstream
-<<<<<<< Updated upstream
-<<<<<<< Updated upstream
-<<<<<<< Updated upstream
-=======
-=======
->>>>>>> Stashed changes
-=======
->>>>>>> Stashed changes
-=======
->>>>>>> Stashed changes
-<<<<<<< HEAD
-      "start": 22.499999999090203,
-      "finish": 28.499999999090203,
-      "machine": 3,
-      "station": 1
-=======
-<<<<<<< Updated upstream
-<<<<<<< Updated upstream
-<<<<<<< Updated upstream
->>>>>>> Stashed changes
-=======
->>>>>>> Stashed changes
-=======
->>>>>>> Stashed changes
-=======
->>>>>>> Stashed changes
-      "start": 22.5,
-      "finish": 28.5,
-      "machine": 3,
-      "station": 2
-<<<<<<< Updated upstream
-<<<<<<< Updated upstream
-<<<<<<< Updated upstream
-<<<<<<< Updated upstream
-=======
->>>>>>> 669b3011590e580813f476cbf650bbac1c8256a7
->>>>>>> Stashed changes
-=======
->>>>>>> 669b3011590e580813f476cbf650bbac1c8256a7
->>>>>>> Stashed changes
-=======
->>>>>>> 669b3011590e580813f476cbf650bbac1c8256a7
->>>>>>> Stashed changes
-=======
->>>>>>> 669b3011590e580813f476cbf650bbac1c8256a7
->>>>>>> Stashed changes
+      "station": 3
     },
     {
       "op_id": 13,
       "op_label": "13",
       "job_id": 4,
       "start": 6.0,
-      "finish": 12.5,
-      "machine": 2,
-      "station": 8
-    },
-    {
-      "op_id": 14,
-      "op_label": "14",
-      "job_id": 4,
-<<<<<<< Updated upstream
-<<<<<<< Updated upstream
-<<<<<<< Updated upstream
-<<<<<<< Updated upstream
-=======
-=======
->>>>>>> Stashed changes
-=======
->>>>>>> Stashed changes
-=======
->>>>>>> Stashed changes
-<<<<<<< HEAD
-      "start": 28.399999998173044,
-      "finish": 36.899999998173044,
-      "machine": 4,
-      "station": 2
-=======
-<<<<<<< Updated upstream
-<<<<<<< Updated upstream
-<<<<<<< Updated upstream
->>>>>>> Stashed changes
-=======
->>>>>>> Stashed changes
-=======
->>>>>>> Stashed changes
-=======
->>>>>>> Stashed changes
-      "start": 20.5,
-      "finish": 31.0,
-      "machine": 8,
-      "station": 1
->>>>>>> 669b3011590e580813f476cbf650bbac1c8256a7
+      "finish": 12.0,
+      "machine": 1,
+      "station": 4
     },
     {
       "op_id": 15,
       "op_label": "15",
       "job_id": 5,
-      "start": 8.5,
+      "start": 8.0,
       "finish": 11.5,
-      "machine": 1,
+      "machine": 2,
+      "station": 5
+    },
+    {
+      "op_id": 20,
+      "op_label": "20",
+      "job_id": 6,
+      "start": 10.0,
+      "finish": 16.0,
+      "machine": 7,
       "station": 6
+    },
+    {
+      "op_id": 19,
+      "op_label": "19",
+      "job_id": 6,
+      "start": 10.0,
+      "finish": 17.21820045138889,
+      "machine": 3,
+      "station": 7
+    },
+    {
+      "op_id": 6,
+      "op_label": "6",
+      "job_id": 2,
+      "start": 10.5,
+      "finish": 16.0,
+      "machine": 4,
+      "station": 2
+    },
+    {
+      "op_id": 5,
+      "op_label": "5",
+      "job_id": 2,
+      "start": 11.5,
+      "finish": 15.0,
+      "machine": 2,
+      "station": 1
     },
     {
       "op_id": 16,
       "op_label": "16",
       "job_id": 5,
-<<<<<<< Updated upstream
-<<<<<<< Updated upstream
-<<<<<<< Updated upstream
-<<<<<<< Updated upstream
       "start": 11.5,
-      "finish": 21.0,
-=======
-=======
->>>>>>> Stashed changes
-=======
->>>>>>> Stashed changes
-=======
->>>>>>> Stashed changes
-<<<<<<< HEAD
-      "start": 14.999999998863146,
-      "finish": 24.499999998863174,
-=======
-      "start": 11.5,
-      "finish": 21.0,
->>>>>>> 669b3011590e580813f476cbf650bbac1c8256a7
-<<<<<<< Updated upstream
-<<<<<<< Updated upstream
-<<<<<<< Updated upstream
->>>>>>> Stashed changes
-=======
->>>>>>> Stashed changes
-=======
->>>>>>> Stashed changes
-=======
->>>>>>> Stashed changes
-      "machine": 12,
+      "finish": 17.5,
+      "machine": 5,
       "station": 5
     },
     {
       "op_id": 17,
       "op_label": "17",
       "job_id": 5,
-<<<<<<< Updated upstream
-<<<<<<< Updated upstream
-<<<<<<< Updated upstream
-<<<<<<< Updated upstream
-      "start": 22.5,
-      "finish": 28.0,
-      "machine": 2,
-      "station": 9
-=======
-<<<<<<< HEAD
-      "start": 22.499999999314838,
-      "finish": 27.999999999314838,
-      "machine": 2,
-=======
-<<<<<<< HEAD
-      "start": 22.499999999314838,
-      "finish": 27.999999999314838,
-      "machine": 2,
->>>>>>> Stashed changes
-=======
-<<<<<<< HEAD
-      "start": 22.499999999314838,
-      "finish": 27.999999999314838,
-      "machine": 2,
->>>>>>> Stashed changes
-=======
-<<<<<<< HEAD
-      "start": 22.499999999314838,
-      "finish": 27.999999999314838,
-      "machine": 2,
->>>>>>> Stashed changes
-      "station": 4
-=======
-      "start": 22.5,
-      "finish": 28.0,
-      "machine": 2,
-      "station": 9
->>>>>>> 669b3011590e580813f476cbf650bbac1c8256a7
-<<<<<<< Updated upstream
-<<<<<<< Updated upstream
-<<<<<<< Updated upstream
->>>>>>> Stashed changes
-=======
->>>>>>> Stashed changes
-=======
->>>>>>> Stashed changes
-=======
->>>>>>> Stashed changes
-    },
-    {
-      "op_id": 18,
-      "op_label": "18",
-      "job_id": 5,
-<<<<<<< Updated upstream
-<<<<<<< Updated upstream
-<<<<<<< Updated upstream
-<<<<<<< Updated upstream
-=======
-=======
->>>>>>> Stashed changes
-=======
->>>>>>> Stashed changes
-=======
->>>>>>> Stashed changes
-<<<<<<< HEAD
-      "start": 27.999999999314838,
-      "finish": 35.99999999931484,
-      "machine": 5,
-      "station": 3
-=======
-<<<<<<< Updated upstream
-<<<<<<< Updated upstream
-<<<<<<< Updated upstream
->>>>>>> Stashed changes
-=======
->>>>>>> Stashed changes
-=======
->>>>>>> Stashed changes
-=======
->>>>>>> Stashed changes
-      "start": 28.5,
-      "finish": 35.5,
-      "machine": 3,
-      "station": 2
-<<<<<<< Updated upstream
-<<<<<<< Updated upstream
-<<<<<<< Updated upstream
-<<<<<<< Updated upstream
-=======
->>>>>>> 669b3011590e580813f476cbf650bbac1c8256a7
->>>>>>> Stashed changes
-=======
->>>>>>> 669b3011590e580813f476cbf650bbac1c8256a7
->>>>>>> Stashed changes
-=======
->>>>>>> 669b3011590e580813f476cbf650bbac1c8256a7
->>>>>>> Stashed changes
-=======
->>>>>>> 669b3011590e580813f476cbf650bbac1c8256a7
->>>>>>> Stashed changes
-    },
-    {
-      "op_id": 19,
-      "op_label": "19",
-      "job_id": 6,
-<<<<<<< Updated upstream
-<<<<<<< Updated upstream
-<<<<<<< Updated upstream
-<<<<<<< Updated upstream
-=======
-=======
->>>>>>> Stashed changes
-=======
->>>>>>> Stashed changes
-=======
->>>>>>> Stashed changes
-<<<<<<< HEAD
-      "start": 27.49999999931481,
-      "finish": 34.49999999931484,
+      "start": 12.0,
+      "finish": 17.0,
       "machine": 1,
-      "station": 7
-=======
-<<<<<<< Updated upstream
-<<<<<<< Updated upstream
-<<<<<<< Updated upstream
->>>>>>> Stashed changes
-=======
->>>>>>> Stashed changes
-=======
->>>>>>> Stashed changes
-=======
->>>>>>> Stashed changes
-      "start": 28.8,
-      "finish": 36.3,
-      "machine": 2,
       "station": 4
-<<<<<<< Updated upstream
-<<<<<<< Updated upstream
-<<<<<<< Updated upstream
-<<<<<<< Updated upstream
-=======
->>>>>>> 669b3011590e580813f476cbf650bbac1c8256a7
->>>>>>> Stashed changes
-=======
->>>>>>> 669b3011590e580813f476cbf650bbac1c8256a7
->>>>>>> Stashed changes
-=======
->>>>>>> 669b3011590e580813f476cbf650bbac1c8256a7
->>>>>>> Stashed changes
-=======
->>>>>>> 669b3011590e580813f476cbf650bbac1c8256a7
->>>>>>> Stashed changes
-    },
-    {
-      "op_id": 20,
-      "op_label": "20",
-      "job_id": 6,
-<<<<<<< Updated upstream
-<<<<<<< Updated upstream
-<<<<<<< Updated upstream
-<<<<<<< Updated upstream
-=======
-=======
->>>>>>> Stashed changes
-=======
->>>>>>> Stashed changes
-=======
->>>>>>> Stashed changes
-<<<<<<< HEAD
-      "start": 21.899999998173016,
-      "finish": 28.399999998173044,
-      "machine": 8,
-      "station": 2
-=======
-<<<<<<< Updated upstream
-<<<<<<< Updated upstream
-<<<<<<< Updated upstream
->>>>>>> Stashed changes
-=======
->>>>>>> Stashed changes
-=======
->>>>>>> Stashed changes
-=======
->>>>>>> Stashed changes
-      "start": 0.0,
-      "finish": 8.0,
-      "machine": 11,
-      "station": 3
-<<<<<<< Updated upstream
-<<<<<<< Updated upstream
-<<<<<<< Updated upstream
-<<<<<<< Updated upstream
-=======
->>>>>>> 669b3011590e580813f476cbf650bbac1c8256a7
->>>>>>> Stashed changes
-=======
->>>>>>> 669b3011590e580813f476cbf650bbac1c8256a7
->>>>>>> Stashed changes
-=======
->>>>>>> 669b3011590e580813f476cbf650bbac1c8256a7
->>>>>>> Stashed changes
-=======
->>>>>>> 669b3011590e580813f476cbf650bbac1c8256a7
->>>>>>> Stashed changes
-    },
-    {
-      "op_id": 21,
-      "op_label": "21",
-      "job_id": 6,
-<<<<<<< Updated upstream
-<<<<<<< Updated upstream
-<<<<<<< Updated upstream
-<<<<<<< Updated upstream
-=======
-=======
->>>>>>> Stashed changes
-=======
->>>>>>> Stashed changes
-=======
->>>>>>> Stashed changes
-<<<<<<< HEAD
-      "start": 35.699999999091744,
-      "finish": 40.0,
-      "machine": 2,
-      "station": 1
-=======
-<<<<<<< Updated upstream
-<<<<<<< Updated upstream
-<<<<<<< Updated upstream
->>>>>>> Stashed changes
-=======
->>>>>>> Stashed changes
-=======
->>>>>>> Stashed changes
-=======
->>>>>>> Stashed changes
-      "start": 39.3,
-      "finish": 40.0,
-      "machine": 1,
-      "station": 2
-<<<<<<< Updated upstream
-<<<<<<< Updated upstream
-<<<<<<< Updated upstream
-<<<<<<< Updated upstream
-=======
->>>>>>> 669b3011590e580813f476cbf650bbac1c8256a7
->>>>>>> Stashed changes
-=======
->>>>>>> 669b3011590e580813f476cbf650bbac1c8256a7
->>>>>>> Stashed changes
-=======
->>>>>>> 669b3011590e580813f476cbf650bbac1c8256a7
->>>>>>> Stashed changes
-=======
->>>>>>> 669b3011590e580813f476cbf650bbac1c8256a7
->>>>>>> Stashed changes
     },
     {
       "op_id": 22,
       "op_label": "22",
       "job_id": 7,
       "start": 12.0,
-<<<<<<< Updated upstream
-<<<<<<< Updated upstream
-<<<<<<< Updated upstream
-<<<<<<< Updated upstream
       "finish": 20.5,
       "machine": 8,
-      "station": 2
-=======
-=======
->>>>>>> Stashed changes
-=======
->>>>>>> Stashed changes
-=======
->>>>>>> Stashed changes
-<<<<<<< HEAD
-      "finish": 18.5,
-      "machine": 4,
-      "station": 7
-=======
-      "finish": 20.5,
-      "machine": 8,
-      "station": 2
->>>>>>> 669b3011590e580813f476cbf650bbac1c8256a7
-<<<<<<< Updated upstream
-<<<<<<< Updated upstream
-<<<<<<< Updated upstream
->>>>>>> Stashed changes
-=======
->>>>>>> Stashed changes
-=======
->>>>>>> Stashed changes
-=======
->>>>>>> Stashed changes
-    },
-    {
-      "op_id": 23,
-      "op_label": "23",
-      "job_id": 7,
-<<<<<<< Updated upstream
-<<<<<<< Updated upstream
-<<<<<<< Updated upstream
-<<<<<<< Updated upstream
-=======
-=======
->>>>>>> Stashed changes
-=======
->>>>>>> Stashed changes
-=======
->>>>>>> Stashed changes
-<<<<<<< HEAD
-      "start": 27.999999999314838,
-      "finish": 34.49999999931484,
-      "machine": 2,
       "station": 8
-=======
-<<<<<<< Updated upstream
-<<<<<<< Updated upstream
-<<<<<<< Updated upstream
->>>>>>> Stashed changes
-=======
->>>>>>> Stashed changes
-=======
->>>>>>> Stashed changes
-=======
->>>>>>> Stashed changes
-      "start": 30.3,
-      "finish": 36.3,
-      "machine": 1,
-      "station": 9
-<<<<<<< Updated upstream
-<<<<<<< Updated upstream
-<<<<<<< Updated upstream
-<<<<<<< Updated upstream
-=======
->>>>>>> 669b3011590e580813f476cbf650bbac1c8256a7
->>>>>>> Stashed changes
-=======
->>>>>>> 669b3011590e580813f476cbf650bbac1c8256a7
->>>>>>> Stashed changes
-=======
->>>>>>> 669b3011590e580813f476cbf650bbac1c8256a7
->>>>>>> Stashed changes
-=======
->>>>>>> 669b3011590e580813f476cbf650bbac1c8256a7
->>>>>>> Stashed changes
     },
     {
-      "op_id": 24,
-      "op_label": "24",
-      "job_id": 7,
-<<<<<<< Updated upstream
-<<<<<<< Updated upstream
-<<<<<<< Updated upstream
-<<<<<<< Updated upstream
-=======
-=======
->>>>>>> Stashed changes
-=======
->>>>>>> Stashed changes
-=======
->>>>>>> Stashed changes
-<<<<<<< HEAD
-      "start": 18.5,
-      "finish": 29.5,
-      "machine": 9,
-      "station": 6
-=======
-<<<<<<< Updated upstream
-<<<<<<< Updated upstream
-<<<<<<< Updated upstream
->>>>>>> Stashed changes
-=======
->>>>>>> Stashed changes
-=======
->>>>>>> Stashed changes
-=======
->>>>>>> Stashed changes
-      "start": 21.0,
-      "finish": 30.0,
-      "machine": 5,
-      "station": 5
-<<<<<<< Updated upstream
-<<<<<<< Updated upstream
-<<<<<<< Updated upstream
-<<<<<<< Updated upstream
-=======
->>>>>>> 669b3011590e580813f476cbf650bbac1c8256a7
->>>>>>> Stashed changes
-=======
->>>>>>> 669b3011590e580813f476cbf650bbac1c8256a7
->>>>>>> Stashed changes
-=======
->>>>>>> 669b3011590e580813f476cbf650bbac1c8256a7
->>>>>>> Stashed changes
-=======
->>>>>>> 669b3011590e580813f476cbf650bbac1c8256a7
->>>>>>> Stashed changes
-    },
-    {
-      "op_id": 25,
-      "op_label": "25",
-      "job_id": 7,
-<<<<<<< Updated upstream
-<<<<<<< Updated upstream
-<<<<<<< Updated upstream
-<<<<<<< Updated upstream
-=======
-=======
->>>>>>> Stashed changes
-=======
->>>>>>> Stashed changes
-=======
->>>>>>> Stashed changes
-<<<<<<< HEAD
-      "start": 34.49999999931484,
-      "finish": 37.499999999090704,
-      "machine": 1,
-      "station": 5
-=======
-<<<<<<< Updated upstream
-<<<<<<< Updated upstream
-<<<<<<< Updated upstream
->>>>>>> Stashed changes
-=======
->>>>>>> Stashed changes
-=======
->>>>>>> Stashed changes
-=======
->>>>>>> Stashed changes
-      "start": 36.3,
-      "finish": 39.3,
-      "machine": 1,
-      "station": 4
-<<<<<<< Updated upstream
-<<<<<<< Updated upstream
-<<<<<<< Updated upstream
-<<<<<<< Updated upstream
-=======
->>>>>>> 669b3011590e580813f476cbf650bbac1c8256a7
->>>>>>> Stashed changes
-=======
->>>>>>> 669b3011590e580813f476cbf650bbac1c8256a7
->>>>>>> Stashed changes
-=======
->>>>>>> 669b3011590e580813f476cbf650bbac1c8256a7
->>>>>>> Stashed changes
-=======
->>>>>>> 669b3011590e580813f476cbf650bbac1c8256a7
->>>>>>> Stashed changes
-    },
-    {
-      "op_id": 26,
-      "op_label": "26",
-      "job_id": 7,
-<<<<<<< Updated upstream
-<<<<<<< Updated upstream
-<<<<<<< Updated upstream
-<<<<<<< Updated upstream
-=======
-=======
->>>>>>> Stashed changes
-=======
->>>>>>> Stashed changes
-=======
->>>>>>> Stashed changes
-<<<<<<< HEAD
-      "start": 37.499999999090704,
-      "finish": 40.0,
-      "machine": 7,
-      "station": 2
-=======
-<<<<<<< Updated upstream
-<<<<<<< Updated upstream
-<<<<<<< Updated upstream
->>>>>>> Stashed changes
-=======
->>>>>>> Stashed changes
-=======
->>>>>>> Stashed changes
-=======
->>>>>>> Stashed changes
-      "start": 39.5,
-      "finish": 40.0,
-      "machine": 3,
+      "op_id": 10,
+      "op_label": "10",
+      "job_id": 3,
+      "start": 12.5,
+      "finish": 18.0,
+      "machine": 6,
       "station": 3
->>>>>>> 669b3011590e580813f476cbf650bbac1c8256a7
-    },
-    {
-      "op_id": 27,
-      "op_label": "27",
-      "job_id": 8,
-<<<<<<< Updated upstream
-<<<<<<< Updated upstream
-<<<<<<< Updated upstream
-<<<<<<< Updated upstream
-      "start": 36.3,
-      "finish": 41.8,
-=======
-=======
->>>>>>> Stashed changes
-=======
->>>>>>> Stashed changes
-=======
->>>>>>> Stashed changes
-<<<<<<< HEAD
-      "start": 44.699999998172004,
-      "finish": 50.199999998172004,
-=======
-      "start": 36.3,
-      "finish": 41.8,
->>>>>>> 669b3011590e580813f476cbf650bbac1c8256a7
-<<<<<<< Updated upstream
-<<<<<<< Updated upstream
-<<<<<<< Updated upstream
->>>>>>> Stashed changes
-=======
->>>>>>> Stashed changes
-=======
->>>>>>> Stashed changes
-=======
->>>>>>> Stashed changes
-      "machine": 2,
-      "station": 5
     },
     {
       "op_id": 28,
       "op_label": "28",
       "job_id": 8,
-      "start": 0.0,
-      "finish": 9.5,
-      "machine": 8,
-      "station": 5
+      "start": 14.0,
+      "finish": 24.0,
+      "machine": 9,
+      "station": 9
     },
     {
-      "op_id": 29,
-      "op_label": "29",
-      "job_id": 8,
-      "start": 1.5,
-      "finish": 8.5,
+      "op_id": 3,
+      "op_label": "3",
+      "job_id": 1,
+      "start": 15.0,
+      "finish": 17.21820045138889,
+      "machine": 2,
+      "station": 1
+    },
+    {
+      "op_id": 14,
+      "op_label": "14",
+      "job_id": 4,
+      "start": 16.0,
+      "finish": 17.21820045138889,
+      "machine": 4,
+      "station": 2
+    },
+    {
+      "op_id": 9,
+      "op_label": "9",
+      "job_id": 3,
+      "start": 17.0,
+      "finish": 17.21820045138889,
       "machine": 1,
       "station": 4
-    },
-    {
-      "op_id": 30,
-      "op_label": "30",
-      "job_id": 8,
-<<<<<<< Updated upstream
-<<<<<<< Updated upstream
-<<<<<<< Updated upstream
-<<<<<<< Updated upstream
-      "start": 41.8,
-      "finish": 47.3,
-      "machine": 6,
-=======
-=======
->>>>>>> Stashed changes
-=======
->>>>>>> Stashed changes
-=======
->>>>>>> Stashed changes
-<<<<<<< HEAD
-      "start": 50.19999999817011,
-      "finish": 56.69999999816875,
-      "machine": 8,
-=======
-      "start": 41.8,
-      "finish": 47.3,
-      "machine": 6,
->>>>>>> 669b3011590e580813f476cbf650bbac1c8256a7
-<<<<<<< Updated upstream
-<<<<<<< Updated upstream
-<<<<<<< Updated upstream
->>>>>>> Stashed changes
-=======
->>>>>>> Stashed changes
-=======
->>>>>>> Stashed changes
-=======
->>>>>>> Stashed changes
-      "station": 3
     },
     {
       "op_id": 31,
       "op_label": "31",
       "job_id": 9,
-      "start": 40.0,
-<<<<<<< Updated upstream
-<<<<<<< Updated upstream
-<<<<<<< Updated upstream
-<<<<<<< Updated upstream
-      "finish": 60.2,
-      "machine": 3,
-      "station": 4
-=======
-=======
->>>>>>> Stashed changes
-=======
->>>>>>> Stashed changes
-=======
->>>>>>> Stashed changes
-<<<<<<< HEAD
-      "finish": 60.4,
-      "machine": 4,
+      "start": 17.21820045138889,
+      "finish": 37.21820045138889,
+      "machine": 2,
       "station": 7
-=======
-      "finish": 60.2,
-      "machine": 3,
-      "station": 4
->>>>>>> 669b3011590e580813f476cbf650bbac1c8256a7
-<<<<<<< Updated upstream
-<<<<<<< Updated upstream
-<<<<<<< Updated upstream
->>>>>>> Stashed changes
-=======
->>>>>>> Stashed changes
-=======
->>>>>>> Stashed changes
-=======
->>>>>>> Stashed changes
     },
     {
       "op_id": 32,
       "op_label": "32",
       "job_id": 9,
-<<<<<<< Updated upstream
-<<<<<<< Updated upstream
-<<<<<<< Updated upstream
-<<<<<<< Updated upstream
-      "start": 31.0,
-      "finish": 51.4,
-      "machine": 4,
-=======
-=======
->>>>>>> Stashed changes
-=======
->>>>>>> Stashed changes
-=======
->>>>>>> Stashed changes
-<<<<<<< HEAD
-      "start": 40.0,
-      "finish": 60.1,
+      "start": 17.21820045138889,
+      "finish": 37.31820045138889,
       "machine": 3,
-=======
-      "start": 31.0,
-      "finish": 51.4,
-      "machine": 4,
->>>>>>> 669b3011590e580813f476cbf650bbac1c8256a7
-<<<<<<< Updated upstream
-<<<<<<< Updated upstream
-<<<<<<< Updated upstream
->>>>>>> Stashed changes
-=======
->>>>>>> Stashed changes
-=======
->>>>>>> Stashed changes
-=======
->>>>>>> Stashed changes
       "station": 1
     },
     {
-      "op_id": 33,
-      "op_label": "21(cont)",
-      "job_id": 6,
-<<<<<<< Updated upstream
-<<<<<<< Updated upstream
-<<<<<<< Updated upstream
-<<<<<<< Updated upstream
-      "start": 44.5,
-      "finish": 47.8,
-=======
-=======
->>>>>>> Stashed changes
-=======
->>>>>>> Stashed changes
-=======
->>>>>>> Stashed changes
-<<<<<<< HEAD
-      "start": 44.49999999908131,
-      "finish": 44.69999999817341,
-=======
-      "start": 44.5,
-      "finish": 47.8,
->>>>>>> 669b3011590e580813f476cbf650bbac1c8256a7
-<<<<<<< Updated upstream
-<<<<<<< Updated upstream
-<<<<<<< Updated upstream
->>>>>>> Stashed changes
-=======
->>>>>>> Stashed changes
-=======
->>>>>>> Stashed changes
-=======
->>>>>>> Stashed changes
-      "machine": 2,
-      "station": 9
-    },
-    {
-      "op_id": 34,
-      "op_label": "26(cont)",
-      "job_id": 7,
-      "start": 40.0,
-<<<<<<< Updated upstream
-<<<<<<< Updated upstream
-<<<<<<< Updated upstream
-<<<<<<< Updated upstream
-=======
-=======
->>>>>>> Stashed changes
-=======
->>>>>>> Stashed changes
-=======
->>>>>>> Stashed changes
-<<<<<<< HEAD
-      "finish": 44.49999999908852,
-      "machine": 11,
-      "station": 6
-=======
-<<<<<<< Updated upstream
-<<<<<<< Updated upstream
-<<<<<<< Updated upstream
->>>>>>> Stashed changes
-=======
->>>>>>> Stashed changes
-=======
->>>>>>> Stashed changes
-=======
->>>>>>> Stashed changes
-      "finish": 44.5,
-      "machine": 9,
-      "station": 9
-    },
-    {
       "op_id": 35,
-      "op_label": "27(cont)",
-      "job_id": 8,
-      "start": 41.8,
-      "finish": 41.8,
-      "machine": null,
-      "station": null
-<<<<<<< Updated upstream
-<<<<<<< Updated upstream
-<<<<<<< Updated upstream
-<<<<<<< Updated upstream
-=======
->>>>>>> 669b3011590e580813f476cbf650bbac1c8256a7
->>>>>>> Stashed changes
-=======
->>>>>>> 669b3011590e580813f476cbf650bbac1c8256a7
->>>>>>> Stashed changes
-=======
->>>>>>> 669b3011590e580813f476cbf650bbac1c8256a7
->>>>>>> Stashed changes
-=======
->>>>>>> 669b3011590e580813f476cbf650bbac1c8256a7
->>>>>>> Stashed changes
-    }
-  ],
-  "changed_ops": [
+      "op_label": "14 (cont)",
+      "job_id": 4,
+      "start": 18.0,
+      "finish": 25.28179954861111,
+      "machine": 4,
+      "station": 3
+    },
+    {
+      "op_id": 24,
+      "op_label": "24",
+      "job_id": 7,
+      "start": 20.5,
+      "finish": 29.5,
+      "machine": 5,
+      "station": 4
+    },
+    {
+      "op_id": 18,
+      "op_label": "18",
+      "job_id": 5,
+      "start": 25.28179954861111,
+      "finish": 32.78179954861111,
+      "machine": 4,
+      "station": 3
+    },
+    {
+      "op_id": 36,
+      "op_label": "19 (cont)",
+      "job_id": 6,
+      "start": 37.21820045138889,
+      "finish": 38.0,
+      "machine": 2,
+      "station": 3
+    },
+    {
+      "op_id": 33,
+      "op_label": "3 (cont)",
+      "job_id": 1,
+      "start": 37.31820045138889,
+      "finish": 41.6,
+      "machine": 3,
+      "station": 1
+    },
     {
       "op_id": 21,
-<<<<<<< Updated upstream
-<<<<<<< Updated upstream
-<<<<<<< Updated upstream
-<<<<<<< Updated upstream
-      "old_start": 39.3,
-      "old_finish": 43.3,
-      "new_start": 39.3,
-=======
-=======
->>>>>>> Stashed changes
-=======
->>>>>>> Stashed changes
-=======
->>>>>>> Stashed changes
-<<<<<<< HEAD
-      "old_start": 35.699999999091744,
-      "old_finish": 40.199999999091744,
-      "new_start": 35.699999999091744,
-=======
-      "old_start": 39.3,
-      "old_finish": 43.3,
-      "new_start": 39.3,
->>>>>>> 669b3011590e580813f476cbf650bbac1c8256a7
-<<<<<<< Updated upstream
-<<<<<<< Updated upstream
-<<<<<<< Updated upstream
->>>>>>> Stashed changes
-=======
->>>>>>> Stashed changes
-=======
->>>>>>> Stashed changes
-=======
->>>>>>> Stashed changes
-      "new_finish": 40.0
+      "op_label": "21",
+      "job_id": 6,
+      "start": 38.0,
+      "finish": 42.5,
+      "machine": 2,
+      "station": 3
     },
     {
-      "op_id": 26,
-<<<<<<< Updated upstream
-<<<<<<< Updated upstream
-<<<<<<< Updated upstream
-<<<<<<< Updated upstream
-      "old_start": 39.5,
-      "old_finish": 44.5,
-      "new_start": 39.5,
-      "new_finish": 40.0
+      "op_id": 7,
+      "op_label": "7",
+      "job_id": 2,
+      "start": 41.6,
+      "finish": 47.6,
+      "machine": 3,
+      "station": 1
     },
     {
-      "op_id": 30,
-=======
-=======
->>>>>>> Stashed changes
-=======
->>>>>>> Stashed changes
-=======
->>>>>>> Stashed changes
-<<<<<<< HEAD
-      "old_start": 37.499999999090704,
-      "old_finish": 44.49999999909073,
-      "new_start": 37.499999999090704,
-      "new_finish": 40.0
+      "op_id": 23,
+      "op_label": "23",
+      "job_id": 7,
+      "start": 42.5,
+      "finish": 49.0,
+      "machine": 2,
+      "station": 3
     },
     {
       "op_id": 27,
-      "old_start": 40.199999999091744,
-      "old_finish": 45.699999999091716,
-      "new_start": 44.699999998172004,
-      "new_finish": 50.199999998172004
+      "op_label": "27",
+      "job_id": 8,
+      "start": 47.6,
+      "finish": 53.6,
+      "machine": 3,
+      "station": 1
+    },
+    {
+      "op_id": 25,
+      "op_label": "25",
+      "job_id": 7,
+      "start": 49.0,
+      "finish": 52.5,
+      "machine": 2,
+      "station": 3
+    },
+    {
+      "op_id": 26,
+      "op_label": "26",
+      "job_id": 7,
+      "start": 52.5,
+      "finish": 58.0,
+      "machine": 4,
+      "station": 3
+    },
+    {
+      "op_id": 34,
+      "op_label": "9 (cont)",
+      "job_id": 3,
+      "start": 52.5,
+      "finish": 59.28179954861111,
+      "machine": 2,
+      "station": 4
+    },
+    {
+      "op_id": 29,
+      "op_label": "29",
+      "job_id": 8,
+      "start": 53.6,
+      "finish": 61.6,
+      "machine": 3,
+      "station": 1
+    },
+    {
+      "op_id": 11,
+      "op_label": "11",
+      "job_id": 3,
+      "start": 59.28179954861111,
+      "finish": 63.78179954861111,
+      "machine": 2,
+      "station": 3
     },
     {
       "op_id": 30,
-      "old_start": 45.69999999817305,
-      "old_finish": 49.69999999817305,
-      "new_start": 50.19999999817011,
-      "new_finish": 56.69999999816875
-=======
-      "old_start": 39.5,
-      "old_finish": 44.5,
-      "new_start": 39.5,
-      "new_finish": 40.0
+      "op_label": "30",
+      "job_id": 8,
+      "start": 61.6,
+      "finish": 66.1,
+      "machine": 4,
+      "station": 1
     },
     {
-      "op_id": 30,
-<<<<<<< Updated upstream
-<<<<<<< Updated upstream
-<<<<<<< Updated upstream
->>>>>>> Stashed changes
-=======
->>>>>>> Stashed changes
-=======
->>>>>>> Stashed changes
-=======
->>>>>>> Stashed changes
-      "old_start": 42.2,
-      "old_finish": 49.7,
-      "new_start": 41.8,
-      "new_finish": 47.3
-<<<<<<< Updated upstream
-<<<<<<< Updated upstream
-<<<<<<< Updated upstream
-<<<<<<< Updated upstream
-=======
->>>>>>> 669b3011590e580813f476cbf650bbac1c8256a7
->>>>>>> Stashed changes
-=======
->>>>>>> 669b3011590e580813f476cbf650bbac1c8256a7
->>>>>>> Stashed changes
-=======
->>>>>>> 669b3011590e580813f476cbf650bbac1c8256a7
->>>>>>> Stashed changes
-=======
->>>>>>> 669b3011590e580813f476cbf650bbac1c8256a7
->>>>>>> Stashed changes
+      "op_id": 12,
+      "op_label": "12",
+      "job_id": 3,
+      "start": 63.78179954861111,
+      "finish": 70.7817995486111,
+      "machine": 5,
+      "station": 3
     }
   ],
-  "note": "Urgent-job reschedule.",
+  "note": "Reschedule solved by same engine: HeuristicBaseModel.run_heuristic (urgent-priority enabled)",
   "scenario_name": "Scenario 05 — Combined Shock: Urgent Job + Machine & Station Outage",
-  "mode": "optimize",
+  "scenario_file": "scenario_05_combined_shock.json",
+  "baseline_file": "baseline_solution_05.json",
+  "reschedule_run_iso_utc": "2026-02-05T10:20:41.443029+00:00",
   "disruptions": {
     "unavailable_machines": [
       1
@@ -1511,6 +410,5 @@
     "unavailable_stations": [
       2
     ]
-  },
-  "applied_overrides_at_reschedule": {}
+  }
 }

@@ -6,6 +6,7 @@
     "mode": "optimize",
     "unavailable_machines": [1],
     "unavailable_stations": [2],
-    "urgent_payload_path": "scenarios/urgent_05_combined_shock.json"
+   "urgent_payload_path": "urgent_05_combined_shock.json"
+
   }
 }
