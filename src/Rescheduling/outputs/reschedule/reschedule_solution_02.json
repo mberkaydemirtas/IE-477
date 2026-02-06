@@ -1,0 +1,357 @@
+{
+  "t0": 11.873355999722222,
+  "t_now_iso": null,
+  "mode": "optimize",
+  "sets": {
+    "I_done": [
+      1,
+      2,
+      3,
+      4,
+      8,
+      15
+    ],
+    "I_run": [
+      5,
+      6,
+      9,
+      10,
+      13,
+      16,
+      20
+    ],
+    "I_free": [
+      7,
+      11,
+      12,
+      14,
+      17,
+      18,
+      19,
+      21,
+      22,
+      23,
+      24,
+      25,
+      26,
+      27,
+      28,
+      29,
+      30
+    ],
+    "I_run_broken": [
+      5
+    ]
+  },
+  "objective": {
+    "T_max": 0.0,
+    "C_max": 40.0
+  },
+  "urgent": null,
+  "keep_decisions": {
+    "5": 0,
+    "6": 1,
+    "9": 1,
+    "10": 1,
+    "13": 1,
+    "16": 1,
+    "20": 1
+  },
+  "rem_map": {
+    "5": 31
+  },
+  "schedule": [
+    {
+      "op_id": 1,
+      "op_label": "1",
+      "job_id": 1,
+      "start": 0.0,
+      "finish": 4.0,
+      "machine": 1,
+      "station": 1
+    },
+    {
+      "op_id": 4,
+      "op_label": "4",
+      "job_id": 2,
+      "start": 2.0,
+      "finish": 9.0,
+      "machine": 4,
+      "station": 2
+    },
+    {
+      "op_id": 2,
+      "op_label": "2",
+      "job_id": 1,
+      "start": 4.0,
+      "finish": 9.0,
+      "machine": 5,
+      "station": 1
+    },
+    {
+      "op_id": 3,
+      "op_label": "3",
+      "job_id": 1,
+      "start": 4.0,
+      "finish": 10.0,
+      "machine": 1,
+      "station": 3
+    },
+    {
+      "op_id": 8,
+      "op_label": "8",
+      "job_id": 3,
+      "start": 4.0,
+      "finish": 10.0,
+      "machine": 6,
+      "station": 4
+    },
+    {
+      "op_id": 13,
+      "op_label": "13",
+      "job_id": 4,
+      "start": 6.0,
+      "finish": 12.0,
+      "machine": 2,
+      "station": 5
+    },
+    {
+      "op_id": 15,
+      "op_label": "15",
+      "job_id": 5,
+      "start": 8.0,
+      "finish": 11.0,
+      "machine": 3,
+      "station": 6
+    },
+    {
+      "op_id": 6,
+      "op_label": "6",
+      "job_id": 2,
+      "start": 9.0,
+      "finish": 13.0,
+      "machine": 4,
+      "station": 1
+    },
+    {
+      "op_id": 5,
+      "op_label": "5",
+      "job_id": 2,
+      "start": 10.0,
+      "finish": 11.873355999722222,
+      "machine": 1,
+      "station": 2
+    },
+    {
+      "op_id": 10,
+      "op_label": "10",
+      "job_id": 3,
+      "start": 10.0,
+      "finish": 13.0,
+      "machine": 5,
+      "station": 3
+    },
+    {
+      "op_id": 20,
+      "op_label": "20",
+      "job_id": 6,
+      "start": 10.0,
+      "finish": 13.0,
+      "machine": 6,
+      "station": 4
+    },
+    {
+      "op_id": 16,
+      "op_label": "16",
+      "job_id": 5,
+      "start": 11.0,
+      "finish": 15.0,
+      "machine": 7,
+      "station": 7
+    },
+    {
+      "op_id": 9,
+      "op_label": "9",
+      "job_id": 3,
+      "start": 11.0,
+      "finish": 18.0,
+      "machine": 3,
+      "station": 6
+    },
+    {
+      "op_id": 31,
+      "op_label": "5 (cont)",
+      "job_id": 2,
+      "start": 12.0,
+      "finish": 13.126644000277778,
+      "machine": 2,
+      "station": 2
+    },
+    {
+      "op_id": 22,
+      "op_label": "22",
+      "job_id": 7,
+      "start": 12.0,
+      "finish": 17.0,
+      "machine": 8,
+      "station": 5
+    },
+    {
+      "op_id": 14,
+      "op_label": "14",
+      "job_id": 4,
+      "start": 13.0,
+      "finish": 20.0,
+      "machine": 4,
+      "station": 1
+    },
+    {
+      "op_id": 7,
+      "op_label": "7",
+      "job_id": 2,
+      "start": 13.126644000277778,
+      "finish": 18.12664400027778,
+      "machine": 2,
+      "station": 2
+    },
+    {
+      "op_id": 30,
+      "op_label": "30",
+      "job_id": 8,
+      "start": 14.0,
+      "finish": 17.0,
+      "machine": 5,
+      "station": 3
+    },
+    {
+      "op_id": 28,
+      "op_label": "28",
+      "job_id": 8,
+      "start": 14.0,
+      "finish": 20.0,
+      "machine": 6,
+      "station": 4
+    },
+    {
+      "op_id": 18,
+      "op_label": "18",
+      "job_id": 5,
+      "start": 17.0,
+      "finish": 23.0,
+      "machine": 5,
+      "station": 3
+    },
+    {
+      "op_id": 24,
+      "op_label": "24",
+      "job_id": 7,
+      "start": 17.0,
+      "finish": 24.0,
+      "machine": 7,
+      "station": 5
+    },
+    {
+      "op_id": 11,
+      "op_label": "11",
+      "job_id": 3,
+      "start": 18.0,
+      "finish": 22.0,
+      "machine": 3,
+      "station": 6
+    },
+    {
+      "op_id": 17,
+      "op_label": "17",
+      "job_id": 5,
+      "start": 18.12664400027778,
+      "finish": 23.12664400027778,
+      "machine": 2,
+      "station": 2
+    },
+    {
+      "op_id": 12,
+      "op_label": "12",
+      "job_id": 3,
+      "start": 22.0,
+      "finish": 27.0,
+      "machine": 4,
+      "station": 1
+    },
+    {
+      "op_id": 19,
+      "op_label": "19",
+      "job_id": 6,
+      "start": 22.0,
+      "finish": 29.0,
+      "machine": 3,
+      "station": 4
+    },
+    {
+      "op_id": 23,
+      "op_label": "23",
+      "job_id": 7,
+      "start": 23.12664400027778,
+      "finish": 29.12664400027778,
+      "machine": 2,
+      "station": 2
+    },
+    {
+      "op_id": 26,
+      "op_label": "26",
+      "job_id": 7,
+      "start": 24.0,
+      "finish": 28.0,
+      "machine": 5,
+      "station": 3
+    },
+    {
+      "op_id": 21,
+      "op_label": "21",
+      "job_id": 6,
+      "start": 29.0,
+      "finish": 33.0,
+      "machine": 3,
+      "station": 1
+    },
+    {
+      "op_id": 25,
+      "op_label": "25",
+      "job_id": 7,
+      "start": 29.12664400027778,
+      "finish": 32.12664400027778,
+      "machine": 2,
+      "station": 2
+    },
+    {
+      "op_id": 27,
+      "op_label": "27",
+      "job_id": 8,
+      "start": 32.12664400027778,
+      "finish": 37.12664400027778,
+      "machine": 2,
+      "station": 2
+    },
+    {
+      "op_id": 29,
+      "op_label": "29",
+      "job_id": 8,
+      "start": 33.0,
+      "finish": 40.0,
+      "machine": 3,
+      "station": 1
+    }
+  ],
+  "note": "Reschedule solved by same engine: HeuristicBaseModel.run_heuristic (urgent-priority enabled)",
+  "scenario_name": "Scenario 02 — Machine Breakdown with Preemption (Optimize Mode)",
+  "scenario_file": "scenario_02_machine_breakdown_preemption.json",
+  "baseline_file": "base_data_baseline_solution.json",
+  "base_data_file": "base_data.json",
+  "reschedule_run_iso_utc": "2026-02-05T23:28:04.293572+00:00",
+  "disruptions": {
+    "unavailable_machines": [
+      1
+    ],
+    "unavailable_stations": []
+  },
+  "result_type": "reschedule"
+}

@@ -1,0 +1,29 @@
+{
+  "urgent_job": {
+    "job_id": 9,
+    "release_time_mode": "t0",
+    "due_time_mode": "t0_plus",
+    "due_time_hours": 2,
+    "ops": [
+      {
+        "op_id": 31,
+        "feasible_stations": [7],
+        "processing_time_hours": 20.0,
+        "beta_big_station_required": false
+      },
+      {
+        "op_id": 32,
+        "feasible_stations": [1, 2],
+        "processing_time_hours": 20.1,
+        "beta_big_station_required": true
+      }
+    ],
+    "precedence_edges": [],
+    "post_ops": {
+      "grinding_required": false,
+      "t_grind_hours": 0.0,
+      "painting_required": true,
+      "t_paint_hours": 2.0
+    }
+  }
+}

@@ -6,10 +6,20 @@ import os
 import re
 import sys
 import subprocess
-from datetime import datetime, timezone
 from typing import Optional, Tuple
+from datetime import datetime, timezone
 
-from solver_core import make_base_data, solve_baseline, solve_reschedule
+from solver_core import solve_reschedule
+
+
+DEFAULT_BASE_DATA_PATH = os.path.normpath(
+    os.path.join(os.path.dirname(__file__), "data", "base_data.json")
+)
+
+OUT_BASELINE_DIR = os.path.normpath(os.path.join(os.path.dirname(__file__), "outputs", "baseline"))
+OUT_RESCHEDULE_DIR = os.path.normpath(os.path.join(os.path.dirname(__file__), "outputs", "reschedule"))
+
+REFERENCE_BASELINE_SOLUTION = os.path.join(OUT_BASELINE_DIR, "base_data_baseline_solution.json")
 
 
 def _load_json(path: str) -> dict:
@@ -48,6 +58,9 @@ def _pick_disruptions(scn: dict) -> Tuple[list, list]:
     rb = _res_block(scn)
     um = rb.get("unavailable_machines", scn.get("unavailable_machines", [])) or []
     us = rb.get("unavailable_stations", scn.get("unavailable_stations", [])) or []
+    if isinstance(scn.get("disruptions"), dict):
+        um = scn["disruptions"].get("unavailable_machines", um) or um
+        us = scn["disruptions"].get("unavailable_stations", us) or us
     return [int(x) for x in um], [int(x) for x in us]
 
 def _resolve_rel_path(base_dir: str, p: str) -> Optional[str]:
@@ -58,7 +71,7 @@ def _resolve_rel_path(base_dir: str, p: str) -> Optional[str]:
     p2 = os.path.normpath(os.path.join(base_dir, p))
     if os.path.exists(p2):
         return p2
-    if os.path.basename(base_dir).lower() == "scenarios":
+    if os.path.basename(base_dir).lower() in ["scenarios", "rescheduling_scenarios"]:
         p3 = os.path.normpath(os.path.join(os.path.dirname(base_dir), p))
         if os.path.exists(p3):
             return p3
@@ -77,16 +90,11 @@ def _pick_urgent_payload(scn: dict, base_dir: str) -> Optional[dict]:
             return _load_json(p2)
     return None
 
-
-# -------------------------------
-# Baseline filename logic
-# -------------------------------
-
 def _infer_scenario_id(scn: dict, scenario_path: str) -> int:
     sid = scn.get("scenario_id", None)
     if sid is not None:
         try:
-            return int(sid)
+            return int(str(sid))
         except Exception:
             pass
 
@@ -108,98 +116,77 @@ def _infer_scenario_id(scn: dict, scenario_path: str) -> int:
 
     return -1
 
-def _pick_baseline_output_name(scn: dict, scenario_path: str) -> str:
-    if scn.get("baseline_output"):
-        return str(scn["baseline_output"]).strip()
-    sid = _infer_scenario_id(scn, scenario_path)
-    if sid >= 0:
-        return f"baseline_solution_{sid:02d}.json"
-    return "baseline_solution.json"
+def _resolve_base_data_path(scn: dict, scenario_path: str) -> str:
+    base_dir = os.path.dirname(os.path.abspath(scenario_path))
 
-def _ensure_baseline(scn: dict, scenario_path: str, workdir: str) -> str:
-    out_name = _pick_baseline_output_name(scn, scenario_path)
-    out_path = os.path.join(workdir, out_name)
+    p = scn.get("base_data_path", None)
+    if isinstance(p, str) and p.strip():
+        if os.path.isabs(p) and os.path.exists(p):
+            return p
+        p2 = os.path.normpath(os.path.join(base_dir, p))
+        if os.path.exists(p2):
+            return p2
 
-    if os.path.exists(out_path):
-        return out_path
+    if os.path.exists(DEFAULT_BASE_DATA_PATH):
+        return DEFAULT_BASE_DATA_PATH
 
-    print(f"⚠️ Baseline missing ({out_name}). Creating baseline...")
-
-    scenario_name = _scenario_name(scn, scenario_path)
-    plan_calendar = scn.get("plan_calendar", {"utc_offset": "+03:00"})
-    plan_start_iso = datetime.now(timezone.utc).isoformat()
-
-    # ✅ Baseline data: normal system only (NO overrides)
-    base = make_base_data(overrides={})
-    data = _deep_merge(base, scn["data"]) if isinstance(scn.get("data"), dict) else base
-
-    baseline = solve_baseline(
-        data,
-        plan_start_iso=plan_start_iso,
-        plan_calendar=plan_calendar,
-        k1=float(scn.get("k1", 2.0)),
+    raise FileNotFoundError(
+        "Base data file not found. Provide scenario['base_data_path'] or update DEFAULT_BASE_DATA_PATH.\n"
+        f"DEFAULT_BASE_DATA_PATH={DEFAULT_BASE_DATA_PATH}"
     )
-    baseline["scenario_name"] = scenario_name
-    baseline["scenario_file"] = os.path.basename(scenario_path)
-    baseline["baseline_run_iso_utc"] = datetime.now(timezone.utc).isoformat()
 
-    _save_json_atomic(out_path, baseline)
-    print(f"✅ Baseline saved: {out_path}")
-    return out_path
-
-
-def _run_plotter(workdir: str, reschedule_path: str):
-    script = os.path.join(workdir, "plot_gantt_reschedule.py")
+def _run_plotter(script_name: str, json_path: str, outdir: str, sid_override: str):
+    script = os.path.join(os.path.dirname(__file__), script_name)
     if not os.path.exists(script):
-        print("⚠️ Plotter not found: plot_gantt_reschedule.py (skipping charts)")
+        print(f"Plotter not found: {script_name}")
         return
-    print("📊 Generating Gantt charts...")
-    subprocess.run([sys.executable, script, reschedule_path], cwd=workdir, check=False)
+    subprocess.run([sys.executable, script, json_path, outdir, sid_override], cwd=os.path.dirname(__file__), check=False)
 
 
 def main():
     if len(sys.argv) < 2:
-        print("Usage: py run_reschedule.py scenarios/<scenario>.json")
+        print("Usage: py run_reschedule.py Rescheduling_scenarios/<scenario>.json")
         sys.exit(1)
 
     scenario_path = sys.argv[1]
     if not os.path.exists(scenario_path):
-        print(f"❌ Scenario file not found: {scenario_path}")
+        print(f"Scenario file not found: {scenario_path}")
         sys.exit(1)
 
     scn = _load_json(scenario_path)
-    workdir = os.path.dirname(os.path.abspath(__file__))
     base_dir = os.path.dirname(os.path.abspath(scenario_path))
 
     scenario_name = _scenario_name(scn, scenario_path)
+    sid = _infer_scenario_id(scn, scenario_path)
+    sid_txt = f"{sid:02d}" if sid >= 0 else "xx"
+
     print("scenario:", scenario_name)
 
-    baseline_path = _ensure_baseline(scn, scenario_path, workdir)
-    baseline = _load_json(baseline_path)
+    base_data_path = _resolve_base_data_path(scn, scenario_path)
+    print("base_data:", base_data_path)
 
-    print("baseline_file:", os.path.basename(baseline_path))
+    if not os.path.exists(REFERENCE_BASELINE_SOLUTION):
+        raise FileNotFoundError(
+            "Reference baseline solution not found.\n"
+            f"Expected: {REFERENCE_BASELINE_SOLUTION}\n"
+            "Run: py run_baseline.py data/base_data.json"
+        )
+
+    baseline = _load_json(REFERENCE_BASELINE_SOLUTION)
     print("plan_start_iso:", baseline.get("plan_start_iso"))
 
-    # ✅ RESCHEDULE DATA:
-    # normal base data + optional scn["data"] + scenario overrides (ONLY here!)
-    base = make_base_data(overrides={})
-    data_base = _deep_merge(base, scn["data"]) if isinstance(scn.get("data"), dict) else base
+    data_base = _load_json(base_data_path)
+
+    if isinstance(scn.get("data"), dict):
+        data_base = _deep_merge(data_base, scn["data"])
 
     overrides = scn.get("overrides", {}) or {}
     if isinstance(overrides, dict) and overrides:
         data_base = _deep_merge(data_base, overrides)
 
-    # debug: confirm overrides actually applied
-    if isinstance(overrides, dict) and ("d_j" in overrides or "r_j" in overrides):
-        print("APPLIED overrides:",
-              "r_j[8]=", data_base.get("r_j", {}).get(8),
-              "d_j[8]=", data_base.get("d_j", {}).get(8),
-              "d_j[3]=", data_base.get("d_j", {}).get(3))
-
     unavailable_machines, unavailable_stations = _pick_disruptions(scn)
     mode = _pick_mode(scn)
     urgent_payload = _pick_urgent_payload(scn, base_dir)
-
     k1 = float(scn.get("k1", 2.0))
 
     rb = _res_block(scn)
@@ -220,19 +207,28 @@ def main():
 
     res["scenario_name"] = scenario_name
     res["scenario_file"] = os.path.basename(scenario_path)
-    res["baseline_file"] = os.path.basename(baseline_path)
+    res["baseline_file"] = os.path.basename(REFERENCE_BASELINE_SOLUTION)
+    res["base_data_file"] = os.path.basename(base_data_path)
     res["reschedule_run_iso_utc"] = datetime.now(timezone.utc).isoformat()
     res["disruptions"] = {"unavailable_machines": unavailable_machines, "unavailable_stations": unavailable_stations}
+    res["result_type"] = "reschedule"
 
-    out_name = scn.get("reschedule_output") or "reschedule_solution.json"
-    out_path = os.path.join(workdir, out_name)
+    os.makedirs(OUT_RESCHEDULE_DIR, exist_ok=True)
+
+    out_name = scn.get("reschedule_output") or f"scenario{sid_txt}_reschedule_solution.json"
+    out_path = os.path.join(OUT_RESCHEDULE_DIR, out_name)
     _save_json_atomic(out_path, res)
 
-    print(f"✅ Reschedule saved: {out_path}")
+    print(f"Reschedule saved: {out_path}")
     print("t0:", res.get("t0"))
     print("objective:", res.get("objective"))
 
-    _run_plotter(workdir=workdir, reschedule_path=out_path)
+    compare_dir = os.path.join(OUT_RESCHEDULE_DIR, f"scenario{sid_txt}_compare_gantts")
+    os.makedirs(compare_dir, exist_ok=True)
+
+    print("Generating comparison Gantt charts...")
+    _run_plotter("plot_gantt_baseline.py", REFERENCE_BASELINE_SOLUTION, compare_dir, sid_txt)
+    _run_plotter("plot_gantt_reschedule.py", out_path, compare_dir, sid_txt)
 
 
 if __name__ == "__main__":

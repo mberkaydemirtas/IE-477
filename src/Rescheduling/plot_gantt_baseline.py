@@ -98,18 +98,21 @@ def _plot_gantt(schedule, key: str, title: str, out_png: str):
     print(f"✅ Saved: {out_png}")
 
 def main():
-    # usage: py plot_gantt_baseline.py <baseline_json_path>
+    # usage:
+    #   py plot_gantt_baseline.py <baseline_json_path> <outdir> [sid_override]
     baseline_path = sys.argv[1] if len(sys.argv) > 1 else "baseline_solution.json"
+    outdir = sys.argv[2] if len(sys.argv) > 2 else os.path.dirname(os.path.abspath(baseline_path))
+    sid_override = sys.argv[3] if len(sys.argv) > 3 else None
+
     base = _load(baseline_path)
     base_sched = base.get("schedule", [])
 
-    sid = _extract_sid(base)
-    workdir = os.path.dirname(os.path.abspath(__file__))
-    outdir = os.path.join(workdir, f"scenario{sid}_gantts")
+    sid = sid_override.zfill(2) if (sid_override and str(sid_override).isdigit()) else _extract_sid(base)
+
     os.makedirs(outdir, exist_ok=True)
 
-    _plot_gantt(base_sched, "machine", f"Scenario {sid} — Baseline (Machine Gantt)", os.path.join(outdir, "gantt_machine_baseline.png"))
-    _plot_gantt(base_sched, "station", f"Scenario {sid} — Baseline (Station Gantt)", os.path.join(outdir, "gantt_station_baseline.png"))
+    _plot_gantt(base_sched, "machine", f"Scenario {sid} — Baseline (Machine Gantt)", os.path.join(outdir, f"scenario{sid}_baseline_machine.png"))
+    _plot_gantt(base_sched, "station", f"Scenario {sid} — Baseline (Station Gantt)", os.path.join(outdir, f"scenario{sid}_baseline_station.png"))
 
 if __name__ == "__main__":
     main()

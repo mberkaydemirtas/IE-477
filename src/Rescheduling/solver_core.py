@@ -2,26 +2,18 @@
 # -*- coding: utf-8 -*-
 
 """
-solver_core.py (Heuristic-based, single-engine)
+solver_core.py
 
-Baseline + Reschedule are BOTH solved by the SAME heuristic:
+Heuristic-based scheduling and rescheduling core.
+
+Provides:
+- time helper functions (working-hours based t0)
+- data normalization utilities
+- baseline solve using a dispatching heuristic
+- reschedule solve using the same heuristic engine
+
+Both baseline and reschedule are solved via:
     HeuristicBaseModel.run_heuristic
-
-Additions in this version:
-- Urgent priority boost:
-    If urgent job is injected, data carries:
-        urgent_job_id, urgent_weight (default 25.0)
-    HeuristicBaseModel multiplies ATC score for urgent job ops.
-- Optional urgent-preemption policy:
-    If urgent job exists and (preempt_for_urgent is True),
-    any *running* operation occupying an urgent-feasible machine at t0 is CUT at t0
-    and a remainder "(cont)" op is created. This allows urgent ops to start ASAP.
-
-Fixes retained:
-- Robust old assignment reading: schedule + x_old/y_old fallback
-- Split remainders ONLY for BROKEN running ops (prevents extra ops)
-- Remainders labeled as "(cont)" via rem_map in output schedule
-- Unknown urgent precedence edges are skipped with warning (instead of breaking)
 """
 
 from datetime import datetime, timezone, timedelta, time as dtime
@@ -31,7 +23,7 @@ from HeuristicBaseModel import run_heuristic, HeuristicResult
 
 
 # ==========================================================
-#  TIME HELPERS (working-hours based t0, no tzdata dependency)
+#  TIME HELPERS
 # ==========================================================
 
 def _parse_hhmm(hhmm: str):
@@ -61,16 +53,7 @@ def compute_t0_from_plan_start(
     plan_calendar: Optional[dict] = None,
     now_iso: Optional[str] = None
 ) -> float:
-    """
-    t0 = elapsed since plan_start_iso measured in working hours.
 
-    plan_calendar: {
-        "utc_offset": "+03:00",
-        "shift_start_local": "08:00",
-        "workday_hours": 8.0,
-        "workdays": [0,1,2,3,4]  # Mon-Fri
-    }
-    """
     plan_calendar = plan_calendar or {}
     utc_offset = plan_calendar.get("utc_offset", "+03:00")
     local_tz = _parse_utc_offset(utc_offset)
@@ -99,7 +82,6 @@ def compute_t0_from_plan_start(
     d = start_local.date()
     today = now_local.date()
 
-    # full days
     while d < today:
         if d.weekday() in workdays:
             s, e = shift_window_for_date(d)
@@ -109,7 +91,6 @@ def compute_t0_from_plan_start(
                 total += (right - left).total_seconds() / 3600.0
         d = d + timedelta(days=1)
 
-    # partial current day
     if today.weekday() in workdays:
         s, e = shift_window_for_date(today)
         left = max(s, start_local) if today == start_local.date() else s
@@ -121,7 +102,7 @@ def compute_t0_from_plan_start(
 
 
 # ==========================================================
-#  JSON / KEY NORMALIZATION HELPERS
+#  DATA NORMALIZATION HELPERS
 # ==========================================================
 
 def _to_int_list(xs) -> List[int]:
@@ -153,13 +134,11 @@ def _normalize_p_im(p_im_raw: Any) -> Dict[Tuple[int, int], float]:
     if isinstance(p_im_raw, dict):
         sample_key = next(iter(p_im_raw.keys()), None)
 
-        # tuple keys
         if isinstance(sample_key, tuple) and len(sample_key) == 2:
             for (i, m), v in p_im_raw.items():
                 out[(int(i), int(m))] = float(v)
             return out
 
-        # "i,m" keys
         if isinstance(sample_key, str) and "," in sample_key:
             for k, v in p_im_raw.items():
                 kk = str(k).replace("(", "").replace(")", "").strip()
@@ -167,8 +146,7 @@ def _normalize_p_im(p_im_raw: Any) -> Dict[Tuple[int, int], float]:
                 out[(int(a), int(b))] = float(v)
             return out
 
-        # nested dict
-        if isinstance(p_im_raw.get(sample_key), dict):
+        if sample_key is not None and isinstance(p_im_raw.get(sample_key), dict):
             for i_key, inner in p_im_raw.items():
                 i = int(i_key)
                 for m_key, v in inner.items():
@@ -210,7 +188,26 @@ def normalize_data(data: Dict[str, Any]) -> Dict[str, Any]:
 
     out["p_im"] = _normalize_p_im(out.get("p_im"))
 
-    # Fill missing job keys safely
+    if (not out.get("p_im")) and (out.get("p_i") is not None):
+        p_i_raw = out.get("p_i") or {}
+        if not isinstance(p_i_raw, dict):
+            raise ValueError("p_i must be a dict like {op_id: processing_time}")
+
+        p_i = {int(k): float(v) for k, v in p_i_raw.items()}
+
+        p_im: Dict[Tuple[int, int], float] = {}
+        for i in out["I"]:
+            ii = int(i)
+            if ii not in p_i:
+                raise ValueError(f"Missing p_i for operation {ii}")
+            feas_m = out["M_i"].get(ii, [])
+            if not feas_m:
+                raise ValueError(f"Missing M_i for operation {ii}")
+            for m in feas_m:
+                p_im[(ii, int(m))] = float(p_i[ii])
+
+        out["p_im"] = p_im
+
     for j in out["J"]:
         if j not in out["p_flag_j"]:
             out["p_flag_j"][j] = 0
@@ -234,7 +231,6 @@ def normalize_old_solution(old_solution: dict) -> dict:
         if k in out and isinstance(out[k], dict):
             out[k] = {int(kk): float(vv) for kk, vv in out[k].items()}
 
-    # x_old/y_old can be stored as {"i,m": 1} OR tuple keys
     for k in ["x_old", "y_old"]:
         if k in out and isinstance(out[k], dict):
             conv = {}
@@ -249,119 +245,6 @@ def normalize_old_solution(old_solution: dict) -> dict:
             out[k] = conv
 
     return out
-
-
-# ==========================================================
-#  DEFAULT BASE DATA (fallback if scenario has no "data")
-# ==========================================================
-
-def make_base_data(overrides: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
-    # (unchanged from your version; omitted here for brevity in this file header)
-    # NOTE: This file is meant to REPLACE your solver_core.py entirely.
-    overrides = overrides or {}
-
-    J = [1, 2, 3, 4, 5, 6, 7, 8]
-    I = list(range(1, 31))
-
-    O_j = {
-        1: [1, 2, 3],
-        2: [4, 5, 6, 7],
-        3: [8, 9, 10, 11, 12],
-        4: [13, 14],
-        5: [15, 16, 17, 18],
-        6: [19, 20, 21],
-        7: [22, 23, 24, 25, 26],
-        8: [27, 28, 29, 30],
-    }
-
-    M = list(range(1, 13))
-    machine_type = {1: 1, 2: 1, 3: 1, 4: 2, 5: 2, 6: 2, 7: 2, 8: 2, 9: 2, 10: 2, 11: 2, 12: 2}
-    K_i = {i: ([1] if (i % 2 == 1) else [2]) for i in I}
-    M_i = {i: [m for m in M if machine_type[m] in K_i[i]] for i in I}
-
-    L = list(range(1, 10))
-    L_i = {i: L[:] for i in I}
-    L_big = [1, 2, 3]
-    L_small = [4, 5, 6, 7, 8, 9]
-
-    Pred_i = {i: [] for i in I}
-    Pred_i[2] = [1]
-    Pred_i[3] = [1]
-    Pred_i[5] = [4]
-    Pred_i[6] = [4]
-    Pred_i[7] = [5]
-    Pred_i[9] = [8]
-    Pred_i[10] = [8]
-    Pred_i[11] = [9, 10]
-    Pred_i[12] = [11]
-    Pred_i[14] = [13]
-    Pred_i[16] = [15]
-    Pred_i[17] = [15]
-    Pred_i[18] = [16]
-    Pred_i[21] = [19, 20]
-    Pred_i[23] = [22]
-    Pred_i[24] = [22]
-    Pred_i[25] = [23]
-    Pred_i[26] = [24]
-
-    for j in J:
-        ops = O_j[j]
-        last = ops[-1]
-        preds = set(Pred_i[last])
-        for op in ops:
-            if op != last:
-                preds.add(op)
-        Pred_i[last] = list(preds)
-
-    p_im: Dict[Tuple[int, int], float] = {}
-    for i in I:
-        for m in M_i[i]:
-            base = 3 + (i % 5)
-            machine_add = (m - 1) * 0.5
-            p_im[(i, m)] = float(base + machine_add)
-
-    release_times = [0.0, 2.0, 4.0, 6.0, 8.0, 10.0, 12.0, 14.0]
-    r_j = {j: float(release_times[idx]) for idx, j in enumerate(J)}
-
-    due_base = 30.0
-    Iend = [O_j[j][-1] for j in J]
-    d_i = {}
-    for idx, i_last in enumerate(Iend):
-        d_i[i_last] = due_base + 3.0 * idx
-    d_j = {j: float(d_i[O_j[j][-1]]) for j in J}
-
-    g_j = {j: (1 if idx % 2 == 0 else 0) for idx, j in enumerate(J)}
-    p_flag_j = {j: (1 if idx in [0, 1, 2] else 0) for idx, j in enumerate(J)}
-
-    t_grind_j = {}
-    t_paint_j = {}
-    for j in J:
-        last_op = O_j[j][-1]
-        t_grind_j[j] = 2.0 + (last_op % 2)
-        t_paint_j[j] = 3.0 if p_flag_j[j] == 1 else 0.0
-
-    beta_i = {i: (1 if i in Iend else 0) for i in I}
-
-    base = {
-        "J": J, "I": I, "O_j": O_j,
-        "M": M, "L": L,
-        "M_i": M_i, "L_i": L_i,
-        "Pred_i": Pred_i,
-        "p_im": p_im,
-        "r_j": r_j, "d_j": d_j,
-        "g_j": g_j, "p_flag_j": p_flag_j,
-        "t_grind_j": t_grind_j, "t_paint_j": t_paint_j,
-        "beta_i": beta_i,
-        "L_small": L_small,
-        "L_big": L_big,
-        "machine_type": machine_type,
-        "K_i": K_i,
-    }
-
-    for k, v in overrides.items():
-        base[k] = v
-
-    return normalize_data(base)
 
 
 # ==========================================================
@@ -435,7 +318,7 @@ def solve_baseline(
 
 
 # ==========================================================
-#  RESCHED HELPERS
+#  RESCHEDULE HELPERS
 # ==========================================================
 
 def classify_ops_by_t0(I: List[int], S_old: Dict[int, float], C_old: Dict[int, float], t0: float):
@@ -446,10 +329,11 @@ def classify_ops_by_t0(I: List[int], S_old: Dict[int, float], C_old: Dict[int, f
 
 
 # ==========================================================
-#  URGENT JOB PAYLOAD
+#  URGENT JOB INJECTION
 # ==========================================================
 
 def add_urgent_job_from_payload(data: Dict[str, Any], t0: float, urgent_payload: dict) -> Dict[str, Any]:
+
     uj = urgent_payload.get("urgent_job", urgent_payload)
 
     data = normalize_data(data)
@@ -490,15 +374,20 @@ def add_urgent_job_from_payload(data: Dict[str, Any], t0: float, urgent_payload:
 
     new_ops: List[int] = []
     max_op = max(I) if I else 0
+
     for op in ops_payload:
         op_id = op.get("op_id", None)
-        if op_id is None:
+        if op_id is not None:
+            try:
+                op_id = int(op_id)
+            except Exception:
+                op_id = None
+
+        if (op_id is None) or (op_id in I) or (op_id in new_ops):
             max_op += 1
             op_id = max_op
-            op["op_id"] = op_id  # persist generated id (so edges can be remapped if needed)
-        op_id = int(op_id)
-        if op_id in I or op_id in new_ops:
-            raise ValueError(f"urgent op_id clashes: {op_id}")
+
+        op["op_id"] = op_id
         new_ops.append(op_id)
 
     J2 = J + [job_id]
@@ -525,7 +414,7 @@ def add_urgent_job_from_payload(data: Dict[str, Any], t0: float, urgent_payload:
             feasM_final = sorted(set(int(mm) for mm in feasM_user).intersection(pt_machines))
 
         if not feasM_final:
-            raise ValueError(f"urgent op {op_id}: feasible_machines ∩ pt_machines is empty")
+            raise ValueError(f"urgent op {op_id}: feasible_machines is empty")
 
         M_i[op_id] = list(feasM_final)
 
@@ -538,12 +427,14 @@ def add_urgent_job_from_payload(data: Dict[str, Any], t0: float, urgent_payload:
         beta_i[op_id] = 1 if bool(op_def.get("beta_big_station_required", False)) else 0
         Pred_i[op_id] = []
 
-    # precedence edges (robust)
-    edges = uj.get("precedence_edges", [])
+    edges = uj.get("precedence_edges", []) or []
+    if (not edges) and len(new_ops) >= 2:
+        edges = [[new_ops[k], new_ops[k + 1]] for k in range(len(new_ops) - 1)]
+
     for a, b in edges:
-        a = int(a); b = int(b)
+        a = int(a)
+        b = int(b)
         if a not in I2 or b not in I2:
-            print(f"⚠️ urgent precedence edge skipped (unknown op id): ({a} -> {b})")
             continue
         if b not in Pred_i:
             Pred_i[b] = []
@@ -572,14 +463,13 @@ def add_urgent_job_from_payload(data: Dict[str, Any], t0: float, urgent_payload:
         "beta_i": beta_i,
         "urgent_job_id": job_id,
         "urgent_ops": new_ops,
-        # heuristic knobs:
         "urgent_weight": float(uj.get("urgent_weight", 25.0)),
     })
     return normalize_data(out)
 
 
 # ==========================================================
-#  SPLIT REMAINDERS FOR RUNNING OPS
+#  RUNNING OPS REMAINDERS
 # ==========================================================
 
 def add_split_remainders_for_running_ops(
@@ -588,9 +478,7 @@ def add_split_remainders_for_running_ops(
     t0: float,
     old_solution: Dict[str, Any]
 ) -> Dict[str, Any]:
-    """
-    Call ONLY for BROKEN/CUT running ops (cut at t0).
-    """
+
     if not I_run_broken:
         out = dict(data)
         out["rem_map"] = {}
@@ -637,7 +525,7 @@ def add_split_remainders_for_running_ops(
         I2.append(i_rem)
 
         j = op_to_job.get(i, None)
-        if j is not None:
+        if j is not None and j in O_j2:
             O_j2[j].append(i_rem)
 
         L_i2[i_rem] = list(L_i[i])
@@ -657,7 +545,6 @@ def add_split_remainders_for_running_ops(
         Pred_i2[i_rem] = [i]
         beta_i2[i_rem] = int(beta_i2.get(i, 0))
 
-        # redirect successors (avoid self-cycle)
         for k in list(Pred_i2.keys()):
             if int(k) == int(i_rem):
                 continue
@@ -717,12 +604,10 @@ def solve_reschedule(
     C_old = old_solution["C_old"]
     I_done, I_run, I_free = classify_ops_by_t0(I0, S_old, C_old, t0)
 
-    # inject urgent job first (if any)
     data1 = data_base
     if urgent_payload:
         data1 = add_urgent_job_from_payload(data1, t0=t0, urgent_payload=urgent_payload)
 
-    # robust old assignment maps (schedule + x_old/y_old fallback)
     sch_machine: Dict[int, int] = {}
     sch_station: Dict[int, int] = {}
 
@@ -747,8 +632,6 @@ def solve_reschedule(
     badM = set(unavailable_machines)
     badL = set(unavailable_stations)
 
-    # urgent-preemption configuration:
-    # default ON if urgent exists (you can disable via urgent_payload["preempt_for_urgent"]=False)
     preempt_for_urgent = True
     if urgent_payload and isinstance(urgent_payload, dict):
         if "preempt_for_urgent" in urgent_payload:
@@ -756,7 +639,6 @@ def solve_reschedule(
         elif isinstance(urgent_payload.get("urgent_job"), dict) and "preempt_for_urgent" in urgent_payload["urgent_job"]:
             preempt_for_urgent = bool(urgent_payload["urgent_job"].get("preempt_for_urgent"))
 
-    # collect urgent-feasible machines (to know which running ops block urgent starts)
     urgent_machines: set = set()
     if urgent_payload and preempt_for_urgent:
         uj = urgent_payload.get("urgent_job", urgent_payload) if isinstance(urgent_payload, dict) else {}
@@ -772,7 +654,6 @@ def solve_reschedule(
     keep_decisions: Dict[int, int] = {}
     I_run_broken: List[int] = []
 
-    # done ops always fixed
     for i in I_done:
         i = int(i)
         fixed_ops[i] = {
@@ -782,7 +663,6 @@ def solve_reschedule(
             "station": sch_station.get(i, None),
         }
 
-    # running ops: broken ones are cut; PLUS urgent-preemption cuts blockers on urgent machines
     for i in I_run:
         i = int(i)
         m0 = sch_machine.get(i, None)
@@ -808,7 +688,6 @@ def solve_reschedule(
             "station": l0,
         }
 
-    # create split remainder ops ONLY for cut/broken running ops
     data2 = add_split_remainders_for_running_ops(data1, I_run_broken, t0, old_solution)
     job_of = _op_to_job(data2["O_j"])
 
@@ -855,7 +734,7 @@ def solve_reschedule(
         "keep_decisions": {int(k): int(v) for k, v in keep_decisions.items()},
         "rem_map": {int(k): int(v) for k, v in rem_map.items()},
         "schedule": schedule,
-        "note": "Reschedule solved by same engine: HeuristicBaseModel.run_heuristic (urgent-priority enabled)"
+        "note": "Reschedule solved by same engine: HeuristicBaseModel.run_heuristic"
     }
 
 def solve_reschedule_open_source(*args, **kwargs):

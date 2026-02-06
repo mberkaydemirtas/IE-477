@@ -105,9 +105,10 @@ def _plot_gantt(schedule, key: str, title: str, out_png: str, t0=None):
 
 def main():
     # usage:
-    #   py plot_gantt_reschedule.py <reschedule_json_path>
-    # default: reschedule_solution.json
+    #   py plot_gantt_reschedule.py <reschedule_json_path> <outdir> [sid_override]
     res_path = sys.argv[1] if len(sys.argv) > 1 else "reschedule_solution.json"
+    outdir = sys.argv[2] if len(sys.argv) > 2 else os.path.dirname(os.path.abspath(res_path))
+    sid_override = sys.argv[3] if len(sys.argv) > 3 else None
 
     if not os.path.exists(res_path):
         print(f"❌ reschedule file not found: {res_path}")
@@ -115,10 +116,8 @@ def main():
 
     res = _load(res_path)
 
-    sid = _extract_sid(res)
-    workdir = os.path.dirname(os.path.abspath(__file__))
+    sid = sid_override.zfill(2) if (sid_override and str(sid_override).isdigit()) else _extract_sid(res)
 
-    outdir = os.path.join(workdir, f"scenario{sid}_gantts")
     os.makedirs(outdir, exist_ok=True)
 
     res_sched = res.get("schedule", [])
@@ -128,14 +127,14 @@ def main():
         res_sched,
         "machine",
         f"Scenario {sid} — Reschedule (Machine Gantt)",
-        os.path.join(outdir, "gantt_machine_reschedule.png"),
+        os.path.join(outdir, f"scenario{sid}_reschedule_machine.png"),
         t0=t0
     )
     _plot_gantt(
         res_sched,
         "station",
         f"Scenario {sid} — Reschedule (Station Gantt)",
-        os.path.join(outdir, "gantt_station_reschedule.png"),
+        os.path.join(outdir, f"scenario{sid}_reschedule_station.png"),
         t0=t0
     )
 
