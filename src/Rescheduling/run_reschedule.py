@@ -21,6 +21,11 @@ OUT_RESCHEDULE_DIR = os.path.normpath(os.path.join(os.path.dirname(__file__), "o
 
 REFERENCE_BASELINE_SOLUTION = os.path.join(OUT_BASELINE_DIR, "base_data_baseline_solution.json")
 
+# ---- Gantt split settings (hours) ----
+# window <= 0 => single gantt (old behavior)
+WINDOW_HOURS =150.0
+OVERLAP_HOURS = 0.0
+
 
 def _load_json(path: str) -> dict:
     with open(path, "r", encoding="utf-8") as f:
@@ -135,13 +140,17 @@ def _resolve_base_data_path(scn: dict, scenario_path: str) -> str:
         f"DEFAULT_BASE_DATA_PATH={DEFAULT_BASE_DATA_PATH}"
     )
 
-def _run_plotter(script_name: str, json_path: str, outdir: str, sid_override: str):
+def _run_plotter(script_name: str, json_path: str, outdir: str, sid_override: str, window_hours: float, overlap_hours: float):
     script = os.path.join(os.path.dirname(__file__), script_name)
     if not os.path.exists(script):
         print(f"Plotter not found: {script_name}")
         return
-    subprocess.run([sys.executable, script, json_path, outdir, sid_override], cwd=os.path.dirname(__file__), check=False)
-
+    # args: json_path outdir sid_override window overlap
+    subprocess.run(
+        [sys.executable, script, json_path, outdir, sid_override, str(window_hours), str(overlap_hours)],
+        cwd=os.path.dirname(__file__),
+        check=False
+    )
 
 def main():
     if len(sys.argv) < 2:
@@ -227,9 +236,8 @@ def main():
     os.makedirs(compare_dir, exist_ok=True)
 
     print("Generating comparison Gantt charts...")
-    _run_plotter("plot_gantt_baseline.py", REFERENCE_BASELINE_SOLUTION, compare_dir, sid_txt)
-    _run_plotter("plot_gantt_reschedule.py", out_path, compare_dir, sid_txt)
-
+    _run_plotter("plot_gantt_baseline.py", REFERENCE_BASELINE_SOLUTION, compare_dir, sid_txt, WINDOW_HOURS, OVERLAP_HOURS)
+    _run_plotter("plot_gantt_reschedule.py", out_path, compare_dir, sid_txt, WINDOW_HOURS, OVERLAP_HOURS)
 
 if __name__ == "__main__":
     main()

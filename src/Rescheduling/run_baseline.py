@@ -3,7 +3,6 @@
 
 """
 run_baseline.py
-
 """
 
 import json
@@ -16,6 +15,11 @@ from solver_core import solve_baseline
 
 
 OUT_BASELINE_DIR = os.path.normpath(os.path.join(os.path.dirname(__file__), "outputs", "baseline"))
+
+# ---- Gantt split settings (hours) ----
+# window <= 0 => single gantt (old behavior)
+WINDOW_HOURS =150.0
+OVERLAP_HOURS = 0.0
 
 
 def _load_json(path: str) -> dict:
@@ -73,7 +77,12 @@ def main():
     plotter = os.path.join(os.path.dirname(__file__), "plot_gantt_baseline.py")
     if os.path.exists(plotter):
         print("📊 Generating BASELINE Gantt charts...")
-        subprocess.run([sys.executable, plotter, out_json, gantt_dir], cwd=os.path.dirname(__file__), check=False)
+        # args: json_path outdir [sid_override] [window_hours] [overlap_hours]
+        subprocess.run(
+            [sys.executable, plotter, out_json, gantt_dir, "", str(WINDOW_HOURS), str(OVERLAP_HOURS)],
+            cwd=os.path.dirname(__file__),
+            check=False
+        )
 
 if __name__ == "__main__":
     main()
