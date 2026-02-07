@@ -1,0 +1,39 @@
+{
+  "calendar": {
+    "utc_offset": "+03:00",
+    "workdays": [0, 1, 2, 3, 4],
+    "shift_start_local": "08:00",
+    "workday_hours": 8.0
+  },
+
+  "machines": {
+    "machine_ids": [1,2,3,4,5,6,7,8,9,10,11,12],
+    "machine_types": {
+      "1": "TIG", "2": "TIG", "3": "TIG",
+      "4": "MAG", "5": "MAG", "6": "MAG", "7": "MAG", "8": "MAG", "9": "MAG",
+      "10": "MAG", "11": "MAG", "12": "MAG"
+    }
+  },
+
+  "stations": {
+    "station_ids": [1,2,3,4,5,6,7,8,9],
+    "station_types": {
+      "1": "BIG",
+      "2": "BIG",
+      "3": "BIG",
+      "4": "SMALL",
+      "5": "SMALL",
+      "6": "SMALL",
+      "7": "SMALL",
+      "8": "SMALL",
+      "9": "SMALL"
+    }
+  },
+
+  "defaults": {
+    "allow_all_machines_if_missing": true,
+    "allow_all_stations_if_missing": true,
+    "default_station_size_requirement": "ANY",
+    "default_processing_time_hours": 1.0
+  }
+}

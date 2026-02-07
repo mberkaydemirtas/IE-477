@@ -1,0 +1,12 @@
+{
+  "name": "Scenario 05 — Combined Shock: Urgent Job + Machine & Station Outage",
+  "baseline_output": "baseline_solution_05.json",
+  "reschedule_output": "reschedule_solution_05.json",
+  "reschedule": {
+    "mode": "optimize",
+    "unavailable_machines": [1],
+    "unavailable_stations": [2],
+   "urgent_payload_path": "urgent_05_combined_shock.json"
+
+  }
+}
