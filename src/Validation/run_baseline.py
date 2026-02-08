@@ -1,17 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 
-"""
-run_baseline.py
-
-Accepts base_data.json in two possible forms:
-A) dict with "operations": [...]
-B) directly a list of operations  -> will wrap to {"operations": [...]}
-
-Also loads system_config.json and uses adapter.build_data_from_operations
-to convert into solver main format before calling solve_baseline.
-"""
-
 import json
 import os
 import sys
@@ -21,12 +10,10 @@ from datetime import datetime, timezone
 from solver_core import solve_baseline
 from adapter import build_data_from_operations
 
-
 OUT_BASELINE_DIR = os.path.normpath(
     os.path.join(os.path.dirname(__file__), "outputs", "baseline")
 )
 
-# ---- Gantt split settings (hours) ----
 WINDOW_HOURS = 250.0
 OVERLAP_HOURS = 0.0
 
@@ -35,8 +22,7 @@ def _load_json(path: str):
     with open(path, "r", encoding="utf-8") as f:
         return json.load(f)
 
-
-def _save_json_atomic(path: str, obj):
+def _save_json_atomic(path: str, obj: dict):
     folder = os.path.dirname(path)
     if folder:
         os.makedirs(folder, exist_ok=True)
@@ -45,51 +31,64 @@ def _save_json_atomic(path: str, obj):
         json.dump(obj, f, indent=2, ensure_ascii=False)
     os.replace(tmp, path)
 
+def _maybe_load_system_config(base_data_path: str):
+    # aynı klasörde system_config.json varsa al
+    base_dir = os.path.dirname(os.path.abspath(base_data_path))
+    cand = os.path.join(base_dir, "system_config.json")
+    if os.path.exists(cand):
+        return _load_json(cand)
+
+    # Validation/data/system_config.json gibi
+    cand2 = os.path.join(os.path.dirname(__file__), "data", "system_config.json")
+    if os.path.exists(cand2):
+        return _load_json(cand2)
+
+    return None
+
 
 def main():
-    if len(sys.argv) < 3:
-        print("Usage: py run_baseline.py data/base_data.json data/system_config.json")
+    if len(sys.argv) < 2:
+        print("Usage: py run_baseline.py data/base_data.json")
         sys.exit(1)
 
     base_data_path = sys.argv[1]
-    system_path = sys.argv[2]
-
     if not os.path.exists(base_data_path):
-        print(f"❌ base_data file not found: {base_data_path}")
-        sys.exit(1)
-    if not os.path.exists(system_path):
-        print(f"❌ system_config file not found: {system_path}")
+        print(f"❌ Base data file not found: {base_data_path}")
         sys.exit(1)
 
     os.makedirs(OUT_BASELINE_DIR, exist_ok=True)
 
     raw = _load_json(base_data_path)
-    system_config = _load_json(system_path)
 
-    # Normalize raw shape: dict expected
+    # ✅ if base_data.json is a list => treat it as operations
     if isinstance(raw, list):
         base_data = {"operations": raw}
-    elif isinstance(raw, dict):
-        base_data = raw
     else:
-        raise ValueError("base_data.json must be a dict or a list of operations")
+        base_data = raw
 
-    # plan start & calendar
-    plan_start_iso = base_data.get("plan_start_iso") or datetime.now(timezone.utc).isoformat()
-    plan_calendar = base_data.get("plan_calendar") or system_config.get("calendar") or {"utc_offset": "+03:00"}
+    system_config = _maybe_load_system_config(base_data_path)
 
-    # ADAPTER STEP (if operations exist)
+    plan_start_iso = datetime.now(timezone.utc).isoformat()
+
+    plan_calendar = (
+        base_data.get("plan_calendar")
+        or base_data.get("calendar")
+        or (system_config.get("calendar") if isinstance(system_config, dict) else None)
+        or {"utc_offset": "+03:00"}
+    )
+
+    location_map = base_data.get("location_map", {}) or {}
+
+    # ✅ ADAPTER
     if "operations" in base_data and isinstance(base_data["operations"], list):
         base_data = build_data_from_operations(
             base_data["operations"],
-            base_meta=base_data,  # pass through k1 etc
+            base_data,
             plan_start_iso=plan_start_iso,
             plan_calendar=plan_calendar,
-            system_config=system_config
+            location_map=location_map,
+            system_config=system_config,   # ✅ pass
         )
-    else:
-        # If you still pass already-converted main format, it will work too
-        base_data["plan_calendar"] = plan_calendar
 
     baseline = solve_baseline(
         base_data,
@@ -99,7 +98,6 @@ def main():
     )
 
     baseline["base_data_file"] = os.path.basename(base_data_path)
-    baseline["system_config_file"] = os.path.basename(system_path)
     baseline["baseline_run_iso_utc"] = datetime.now(timezone.utc).isoformat()
     baseline["result_type"] = "baseline"
 
@@ -110,7 +108,6 @@ def main():
     print("plan_start_iso:", baseline["plan_start_iso"])
     print("objective:", baseline["objective"])
 
-    # charts
     gantt_dir = os.path.join(OUT_BASELINE_DIR, "base_data_gantts")
     os.makedirs(gantt_dir, exist_ok=True)
 

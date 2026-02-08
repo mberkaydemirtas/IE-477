@@ -10,7 +10,7 @@ from typing import Optional, Tuple
 from datetime import datetime, timezone
 
 from solver_core import solve_reschedule
-from adapter import build_data_from_operations
+from adapter import build_data_from_operations  # ✅ ADDED
 
 
 DEFAULT_BASE_DATA_PATH = os.path.normpath(
@@ -23,7 +23,8 @@ OUT_RESCHEDULE_DIR = os.path.normpath(os.path.join(os.path.dirname(__file__), "o
 REFERENCE_BASELINE_SOLUTION = os.path.join(OUT_BASELINE_DIR, "base_data_baseline_solution.json")
 
 # ---- Gantt split settings (hours) ----
-WINDOW_HOURS = 250.0
+# window <= 0 => single gantt (old behavior)
+WINDOW_HOURS = 200.0
 OVERLAP_HOURS = 0.0
 
 
@@ -203,18 +204,21 @@ def main():
     if t_now_iso:
         print("t_now_iso:", t_now_iso)
 
-    # ADAPTER STEP (RESCHEDULE)
+    # ------------------------------------------------------------------
+    # ✅ ADAPTER STEP (RESCHEDULE)
+    # - baseline plan_start_iso'yu kullanıyoruz ki r_j/d_j tutarlı çıksın
+    # - plan_calendar'ı data_base'ten alıyoruz
+    # - operations varsa canonical heuristic datasına çeviriyoruz
+    # ------------------------------------------------------------------
     plan_calendar = data_base.get("plan_calendar", {"utc_offset": "+03:00"})
     plan_start_iso_for_adapter = baseline_plan_start_iso or datetime.now(timezone.utc).isoformat()
-    location_map = data_base.get("location_map", {}) or {}
 
     if "operations" in data_base and isinstance(data_base["operations"], list):
         data_base = build_data_from_operations(
             data_base["operations"],
             data_base,
             plan_start_iso=plan_start_iso_for_adapter,
-            plan_calendar=plan_calendar,
-            location_map=location_map
+            plan_calendar=plan_calendar
         )
 
     res = solve_reschedule(

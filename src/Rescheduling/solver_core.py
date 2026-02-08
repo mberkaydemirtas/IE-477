@@ -331,16 +331,27 @@ def classify_ops_by_t0(I: List[int], S_old: Dict[int, float], C_old: Dict[int, f
 # ==========================================================
 #  URGENT JOB INJECTION
 # ==========================================================
-
 def add_urgent_job_from_payload(data: Dict[str, Any], t0: float, urgent_payload: dict) -> Dict[str, Any]:
+    """
+    More tolerant urgent job injection.
+
+    Accepts any of these per urgent op:
+      - processing_time_by_machine: {machine_id: hours}
+      - cycleTime: minutes (will be converted to hours)
+      - processing_time_hours: hours
+    If none provided -> uses data['default_processing_time_hours'] (or 1.0)
+
+    If feasible_machines missing -> uses ALL machines in data["M"].
+    If feasible_stations missing -> uses ALL stations in data["L"].
+    """
 
     uj = urgent_payload.get("urgent_job", urgent_payload)
-
     data = normalize_data(data)
 
     J = list(data["J"])
     I = list(data["I"])
     O_j = dict(data["O_j"])
+    M = list(data["M"])
     L = list(data["L"])
 
     M_i = dict(data["M_i"])
@@ -355,20 +366,22 @@ def add_urgent_job_from_payload(data: Dict[str, Any], t0: float, urgent_payload:
     t_paint_j = dict(data["t_paint_j"])
     beta_i = dict(data["beta_i"])
 
+    default_pt = float(data.get("default_processing_time_hours", 1.0))
+
     job_id = int(uj["job_id"])
     if job_id in J:
         raise ValueError(f"urgent job_id already exists: {job_id}")
 
     r_mode = uj.get("release_time_mode", "t0")
-    r_u = float(t0) if r_mode == "t0" else float(uj["release_time_hours"])
+    r_u = float(t0) if r_mode == "t0" else float(uj.get("release_time_hours", t0))
 
     d_mode = uj.get("due_time_mode", "t0_plus")
     if d_mode == "t0_plus":
-        d_u = float(t0 + float(uj["due_time_hours"]))
+        d_u = float(t0 + float(uj.get("due_time_hours", 0.0)))
     else:
-        d_u = float(uj["due_time_hours"])
+        d_u = float(uj.get("due_time_hours", 0.0))
 
-    ops_payload = uj.get("ops", [])
+    ops_payload = uj.get("ops", []) or []
     if not ops_payload:
         raise ValueError("urgent_job.ops is empty")
 
@@ -398,53 +411,78 @@ def add_urgent_job_from_payload(data: Dict[str, Any], t0: float, urgent_payload:
     for op_def in ops_payload:
         op_id = int(op_def["op_id"])
 
-        feasL = op_def.get("feasible_stations", L)
+        # stations
+        feasL = op_def.get("feasible_stations", None)
+        if not feasL:
+            feasL = L
         L_i[op_id] = [int(l) for l in feasL]
 
-        pt = op_def.get("processing_time_by_machine", {})
-        if not pt:
-            raise ValueError(f"urgent op {op_id} missing processing_time_by_machine")
-
-        pt_machines = sorted({int(mm) for mm in pt.keys()})
-
+        # machines
         feasM_user = op_def.get("feasible_machines", None)
-        if feasM_user is None:
-            feasM_final = pt_machines
+        if not feasM_user:
+            feasM_final = list(M)
         else:
-            feasM_final = sorted(set(int(mm) for mm in feasM_user).intersection(pt_machines))
-
-        if not feasM_final:
-            raise ValueError(f"urgent op {op_id}: feasible_machines is empty")
-
+            feasM_final = sorted(set(int(mm) for mm in feasM_user))
+            if not feasM_final:
+                feasM_final = list(M)
         M_i[op_id] = list(feasM_final)
 
-        for m in M_i[op_id]:
-            val = pt.get(str(m), pt.get(m, None))
-            if val is None:
-                raise ValueError(f"urgent op {op_id}: missing ptime for machine {m}")
-            p_im[(op_id, int(m))] = float(val)
+        # processing times
+        pt_map = op_def.get("processing_time_by_machine", None)
 
+        if isinstance(pt_map, dict) and pt_map:
+            # normalize keys (string/int)
+            for m in M_i[op_id]:
+                val = pt_map.get(str(m), pt_map.get(m, None))
+                if val is None:
+                    # if map exists but missing one machine, fallback to default_pt
+                    val = default_pt
+                p_im[(op_id, int(m))] = float(val) if float(val) > 0.0 else 0.0
+        else:
+            # fallback chain: cycleTime (minutes) -> processing_time_hours -> default
+            pt_hours = None
+            if op_def.get("cycleTime", None) is not None:
+                try:
+                    pt_hours = float(op_def["cycleTime"]) / 60.0
+                except Exception:
+                    pt_hours = None
+
+            if pt_hours is None and op_def.get("processing_time_hours", None) is not None:
+                try:
+                    pt_hours = float(op_def["processing_time_hours"])
+                except Exception:
+                    pt_hours = None
+
+            if pt_hours is None:
+                pt_hours = default_pt
+
+            # write same ptime for all feasible machines
+            for m in M_i[op_id]:
+                p_im[(op_id, int(m))] = float(pt_hours) if float(pt_hours) > 0.0 else 0.0
+
+        # big station flag
         beta_i[op_id] = 1 if bool(op_def.get("beta_big_station_required", False)) else 0
+
+        # init preds
         Pred_i[op_id] = []
 
+    # precedence edges
     edges = uj.get("precedence_edges", []) or []
     if (not edges) and len(new_ops) >= 2:
         edges = [[new_ops[k], new_ops[k + 1]] for k in range(len(new_ops) - 1)]
 
     for a, b in edges:
-        a = int(a)
-        b = int(b)
+        a = int(a); b = int(b)
         if a not in I2 or b not in I2:
             continue
-        if b not in Pred_i:
-            Pred_i[b] = []
+        Pred_i.setdefault(b, [])
         if a not in Pred_i[b]:
             Pred_i[b].append(a)
 
     r_j[job_id] = r_u
     d_j[job_id] = d_u
 
-    post = uj.get("post_ops", {})
+    post = uj.get("post_ops", {}) or {}
     g_req = bool(post.get("grinding_required", False))
     p_req = bool(post.get("painting_required", False))
     g_j[job_id] = 1 if g_req else 0

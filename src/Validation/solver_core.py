@@ -6,12 +6,6 @@ solver_core.py
 
 Heuristic-based scheduling and rescheduling core.
 
-Provides:
-- time helper functions (working-hours based t0)
-- data normalization utilities
-- baseline solve using a dispatching heuristic
-- reschedule solve using the same heuristic engine
-
 Both baseline and reschedule are solved via:
     HeuristicBaseModel.run_heuristic
 """
@@ -222,6 +216,10 @@ def normalize_data(data: Dict[str, Any]) -> Dict[str, Any]:
         if j not in out["t_paint_j"]:
             out["t_paint_j"][j] = 0.0
 
+    # optional default ptime for urgent fallback
+    if "default_processing_time_hours" not in out:
+        out["default_processing_time_hours"] = 1.0
+
     return out
 
 def normalize_old_solution(old_solution: dict) -> dict:
@@ -322,9 +320,32 @@ def solve_baseline(
 # ==========================================================
 
 def classify_ops_by_t0(I: List[int], S_old: Dict[int, float], C_old: Dict[int, float], t0: float):
-    done = [int(i) for i in I if float(C_old[int(i)]) <= t0 + 1e-9]
-    run  = [int(i) for i in I if (float(S_old[int(i)]) < t0 - 1e-9) and (float(C_old[int(i)]) > t0 + 1e-9)]
-    free = [int(i) for i in I if float(S_old[int(i)]) >= t0 - 1e-9]
+    """
+    Robust classification:
+    - If an op is missing in baseline (no S_old/C_old), treat as FREE (new/unseen op).
+    """
+    done = []
+    run = []
+    free = []
+
+    for i in I:
+        ii = int(i)
+
+        # baseline doesn't know this op -> treat as not started
+        if ii not in S_old or ii not in C_old:
+            free.append(ii)
+            continue
+
+        s = float(S_old[ii])
+        c = float(C_old[ii])
+
+        if c <= t0 + 1e-9:
+            done.append(ii)
+        elif (s < t0 - 1e-9) and (c > t0 + 1e-9):
+            run.append(ii)
+        else:
+            free.append(ii)
+
     return done, run, free
 
 
@@ -333,7 +354,11 @@ def classify_ops_by_t0(I: List[int], S_old: Dict[int, float], C_old: Dict[int, f
 # ==========================================================
 
 def add_urgent_job_from_payload(data: Dict[str, Any], t0: float, urgent_payload: dict) -> Dict[str, Any]:
-
+    """
+    Accepts BOTH formats:
+    - old: ops[*].processing_time_by_machine / feasible_machines / feasible_stations
+    - new: ops[*].cycleTime (minutes), machineCandidates, stationCandidates, stationSizeRequirement
+    """
     uj = urgent_payload.get("urgent_job", urgent_payload)
 
     data = normalize_data(data)
@@ -342,6 +367,7 @@ def add_urgent_job_from_payload(data: Dict[str, Any], t0: float, urgent_payload:
     I = list(data["I"])
     O_j = dict(data["O_j"])
     L = list(data["L"])
+    M = list(data["M"])
 
     M_i = dict(data["M_i"])
     L_i = dict(data["L_i"])
@@ -395,36 +421,66 @@ def add_urgent_job_from_payload(data: Dict[str, Any], t0: float, urgent_payload:
     O_j2 = dict(O_j)
     O_j2[job_id] = list(new_ops)
 
+    default_pt_hours = float(data.get("default_processing_time_hours", 1.0))
+
     for op_def in ops_payload:
         op_id = int(op_def["op_id"])
 
-        feasL = op_def.get("feasible_stations", L)
-        L_i[op_id] = [int(l) for l in feasL]
+        # ----- stations -----
+        feasL = op_def.get("feasible_stations", None)
+        if feasL is None:
+            feasL = op_def.get("stationCandidates", None)
+        if feasL is None:
+            feasL = L
+        L_i[op_id] = [int(l) for l in feasL] if feasL else list(L)
+        if not L_i[op_id]:
+            L_i[op_id] = list(L)
 
-        pt = op_def.get("processing_time_by_machine", {})
-        if not pt:
-            raise ValueError(f"urgent op {op_id} missing processing_time_by_machine")
-
-        pt_machines = sorted({int(mm) for mm in pt.keys()})
-
+        # ----- machines -----
         feasM_user = op_def.get("feasible_machines", None)
         if feasM_user is None:
-            feasM_final = pt_machines
+            feasM_user = op_def.get("machineCandidates", None)
+        if feasM_user is None:
+            feasM_final = list(M)
         else:
-            feasM_final = sorted(set(int(mm) for mm in feasM_user).intersection(pt_machines))
+            feasM_final = sorted({int(x) for x in feasM_user})
 
         if not feasM_final:
-            raise ValueError(f"urgent op {op_id}: feasible_machines is empty")
-
+            raise ValueError(f"urgent op {op_id}: machine candidates empty")
         M_i[op_id] = list(feasM_final)
 
-        for m in M_i[op_id]:
-            val = pt.get(str(m), pt.get(m, None))
-            if val is None:
-                raise ValueError(f"urgent op {op_id}: missing ptime for machine {m}")
-            p_im[(op_id, int(m))] = float(val)
+        # ----- ptime -----
+        pt = op_def.get("processing_time_by_machine", None)
+        if not pt:
+            cycle_time = op_def.get("cycleTime", None)  # minutes
+            if cycle_time is not None:
+                try:
+                    pt_hours = float(cycle_time) / 60.0
+                except Exception:
+                    pt_hours = default_pt_hours
+            else:
+                pt_hours = default_pt_hours
 
-        beta_i[op_id] = 1 if bool(op_def.get("beta_big_station_required", False)) else 0
+            for m in M_i[op_id]:
+                p_im[(op_id, int(m))] = float(pt_hours)
+        else:
+            if not isinstance(pt, dict):
+                raise ValueError(f"urgent op {op_id}: processing_time_by_machine must be dict")
+            for m in M_i[op_id]:
+                val = pt.get(str(m), pt.get(m, None))
+                if val is None:
+                    raise ValueError(f"urgent op {op_id}: missing ptime for machine {m}")
+                p_im[(op_id, int(m))] = float(val)
+
+        # ----- big/small requirement -----
+        ssr = (op_def.get("stationSizeRequirement", None) or "").strip().upper()
+        if ssr == "BIG":
+            beta_i[op_id] = 1
+        elif ssr in ("SMALL", "ANY", ""):
+            beta_i[op_id] = 0
+        else:
+            beta_i[op_id] = 1 if bool(op_def.get("beta_big_station_required", False)) else 0
+
         Pred_i[op_id] = []
 
     edges = uj.get("precedence_edges", []) or []
@@ -478,7 +534,6 @@ def add_split_remainders_for_running_ops(
     t0: float,
     old_solution: Dict[str, Any]
 ) -> Dict[str, Any]:
-
     if not I_run_broken:
         out = dict(data)
         out["rem_map"] = {}
@@ -510,9 +565,20 @@ def add_split_remainders_for_running_ops(
     beta_i2 = dict(beta_i)
 
     def old_machine(i: int) -> Optional[int]:
-        for (ii, m), v in (x_old or {}).items():
-            if int(ii) == int(i) and int(v) == 1:
-                return int(m)
+        # NOTE: your x_old currently stored as {"i,m": 1} strings in baseline.
+        for kk, v in (x_old or {}).items():
+            if int(v) != 1:
+                continue
+            if isinstance(kk, tuple) and len(kk) == 2:
+                ii, m = kk
+                if int(ii) == int(i):
+                    return int(m)
+            else:
+                s = str(kk)
+                if "," in s:
+                    a, b = s.split(",")
+                    if int(a) == int(i):
+                        return int(b)
         return None
 
     for i in I_run_broken:
@@ -621,13 +687,8 @@ def solve_reschedule(
         if r.get("station", None) is not None:
             sch_station[op_id] = int(r["station"])
 
-    def _fill_from_xy(xy_map, out_map):
-        for (i, res), v in (xy_map or {}).items():
-            if int(v) == 1:
-                out_map[int(i)] = int(res)
-
-    _fill_from_xy(old_solution.get("x_old", {}), sch_machine)
-    _fill_from_xy(old_solution.get("y_old", {}), sch_station)
+    # x_old/y_old stored as "i,m" strings -> already ok in add_split_remainders_for_running_ops
+    # keep only schedule dicts above
 
     badM = set(unavailable_machines)
     badL = set(unavailable_stations)
@@ -643,12 +704,12 @@ def solve_reschedule(
     if urgent_payload and preempt_for_urgent:
         uj = urgent_payload.get("urgent_job", urgent_payload) if isinstance(urgent_payload, dict) else {}
         for op in uj.get("ops", []) or []:
-            fm = op.get("feasible_machines", None)
-            if fm:
-                urgent_machines |= set(int(x) for x in fm)
-            else:
-                pt = op.get("processing_time_by_machine", {}) or {}
+            pt = op.get("processing_time_by_machine", {}) or {}
+            if pt:
                 urgent_machines |= set(int(k) for k in pt.keys())
+            else:
+                mc = op.get("feasible_machines", None) or op.get("machineCandidates", None) or []
+                urgent_machines |= set(int(x) for x in mc)
 
     fixed_ops: Dict[int, Dict[str, Any]] = {}
     keep_decisions: Dict[int, int] = {}

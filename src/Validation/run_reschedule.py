@@ -12,13 +12,8 @@ from datetime import datetime, timezone
 from solver_core import solve_reschedule
 from adapter import build_data_from_operations
 
-
 DEFAULT_BASE_DATA_PATH = os.path.normpath(
     os.path.join(os.path.dirname(__file__), "data", "base_data.json")
-)
-
-DEFAULT_SYSTEM_CONFIG_PATH = os.path.normpath(
-    os.path.join(os.path.dirname(__file__), "data", "system_config.json")
 )
 
 OUT_BASELINE_DIR = os.path.normpath(os.path.join(os.path.dirname(__file__), "outputs", "baseline"))
@@ -26,7 +21,6 @@ OUT_RESCHEDULE_DIR = os.path.normpath(os.path.join(os.path.dirname(__file__), "o
 
 REFERENCE_BASELINE_SOLUTION = os.path.join(OUT_BASELINE_DIR, "base_data_baseline_solution.json")
 
-# ---- Gantt split settings (hours) ----
 WINDOW_HOURS = 250.0
 OVERLAP_HOURS = 0.0
 
@@ -144,31 +138,17 @@ def _resolve_base_data_path(scn: dict, scenario_path: str) -> str:
         f"DEFAULT_BASE_DATA_PATH={DEFAULT_BASE_DATA_PATH}"
     )
 
-def _resolve_system_config_path(scn: dict, scenario_path: str) -> str:
-    base_dir = os.path.dirname(os.path.abspath(scenario_path))
-    p = scn.get("system_config_path", None)
-    if isinstance(p, str) and p.strip():
-        p2 = _resolve_rel_path(base_dir, p)
-        if p2:
-            return p2
-        if os.path.isabs(p) and os.path.exists(p):
-            return p
+def _maybe_load_system_config(base_data_path: str):
+    base_dir = os.path.dirname(os.path.abspath(base_data_path))
+    cand = os.path.join(base_dir, "system_config.json")
+    if os.path.exists(cand):
+        return _load_json(cand)
 
-    if os.path.exists(DEFAULT_SYSTEM_CONFIG_PATH):
-        return DEFAULT_SYSTEM_CONFIG_PATH
+    cand2 = os.path.join(os.path.dirname(__file__), "data", "system_config.json")
+    if os.path.exists(cand2):
+        return _load_json(cand2)
 
-    raise FileNotFoundError(
-        "system_config.json not found. Provide scenario['system_config_path'] "
-        f"or create default at: {DEFAULT_SYSTEM_CONFIG_PATH}"
-    )
-
-def _load_base_data_any(path: str) -> dict:
-    raw = _load_json(path)
-    if isinstance(raw, list):
-        return {"operations": raw}
-    if isinstance(raw, dict):
-        return raw
-    raise ValueError("base_data.json must be a dict or a list of operations")
+    return None
 
 def _run_plotter(script_name: str, json_path: str, outdir: str, sid_override: str, window_hours: float, overlap_hours: float):
     script = os.path.join(os.path.dirname(__file__), script_name)
@@ -183,7 +163,7 @@ def _run_plotter(script_name: str, json_path: str, outdir: str, sid_override: st
 
 def main():
     if len(sys.argv) < 2:
-        print("Usage: py run_reschedule.py Rescheduling_scenarios/<scenario>.json")
+        print("Usage: py run_reschedule.py data/<scenario>.json")
         sys.exit(1)
 
     scenario_path = sys.argv[1]
@@ -203,26 +183,27 @@ def main():
     base_data_path = _resolve_base_data_path(scn, scenario_path)
     print("base_data:", base_data_path)
 
-    system_path = _resolve_system_config_path(scn, scenario_path)
-    print("system_config:", system_path)
-    system_config = _load_json(system_path)
+    system_config = _maybe_load_system_config(base_data_path)
+    if system_config:
+        print("system_config:", os.path.join(os.path.dirname(base_data_path), "system_config.json"))
 
     if not os.path.exists(REFERENCE_BASELINE_SOLUTION):
         raise FileNotFoundError(
             "Reference baseline solution not found.\n"
             f"Expected: {REFERENCE_BASELINE_SOLUTION}\n"
-            "Run: py run_baseline.py data/base_data.json data/system_config.json"
+            "Run: py run_baseline.py data/base_data.json"
         )
 
     baseline = _load_json(REFERENCE_BASELINE_SOLUTION)
     baseline_plan_start_iso = baseline.get("plan_start_iso")
-    baseline_plan_calendar = baseline.get("plan_calendar") or system_config.get("calendar") or {"utc_offset": "+03:00"}
     print("plan_start_iso:", baseline_plan_start_iso)
 
-    # ✅ Safe load (dict or list)
-    data_base = _load_base_data_any(base_data_path)
+    raw_base = _load_json(base_data_path)
+    if isinstance(raw_base, list):
+        data_base = {"operations": raw_base}
+    else:
+        data_base = raw_base
 
-    # optional merge blocks
     if isinstance(scn.get("data"), dict):
         data_base = _deep_merge(data_base, scn["data"])
 
@@ -240,17 +221,24 @@ def main():
     if t_now_iso:
         print("t_now_iso:", t_now_iso)
 
-    # ✅ ADAPTER STEP (RESCHEDULE) with NEW signature
-    plan_start_iso_for_adapter = data_base.get("plan_start_iso") or baseline_plan_start_iso or datetime.now(timezone.utc).isoformat()
-    plan_calendar_for_adapter = data_base.get("plan_calendar") or baseline_plan_calendar
+    # ADAPTER STEP (RESCHEDULE)
+    plan_calendar = (
+        data_base.get("plan_calendar")
+        or data_base.get("calendar")
+        or (system_config.get("calendar") if isinstance(system_config, dict) else None)
+        or {"utc_offset": "+03:00"}
+    )
+    plan_start_iso_for_adapter = baseline_plan_start_iso or datetime.now(timezone.utc).isoformat()
+    location_map = data_base.get("location_map", {}) or {}
 
     if "operations" in data_base and isinstance(data_base["operations"], list):
         data_base = build_data_from_operations(
             data_base["operations"],
-            base_meta=data_base,
+            data_base,
             plan_start_iso=plan_start_iso_for_adapter,
-            plan_calendar=plan_calendar_for_adapter,
-            system_config=system_config
+            plan_calendar=plan_calendar,
+            location_map=location_map,
+            system_config=system_config,   # ✅ pass
         )
 
     res = solve_reschedule(
@@ -268,7 +256,6 @@ def main():
     res["scenario_file"] = os.path.basename(scenario_path)
     res["baseline_file"] = os.path.basename(REFERENCE_BASELINE_SOLUTION)
     res["base_data_file"] = os.path.basename(base_data_path)
-    res["system_config_file"] = os.path.basename(system_path)
     res["reschedule_run_iso_utc"] = datetime.now(timezone.utc).isoformat()
     res["disruptions"] = {"unavailable_machines": unavailable_machines, "unavailable_stations": unavailable_stations}
     res["result_type"] = "reschedule"

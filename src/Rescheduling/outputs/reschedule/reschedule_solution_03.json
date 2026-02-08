@@ -1,33 +1,33 @@
 {
-  "t0": 11.873355999722222,
+  "t0": 8.575940142222223,
   "t_now_iso": null,
   "mode": "continue",
   "sets": {
     "I_done": [
-      1,
+      1
+    ],
+    "I_run": [
       2,
       3,
       4,
       8,
+      13,
       15
     ],
-    "I_run": [
+    "I_free": [
       5,
       6,
+      7,
       9,
       10,
-      13,
-      16,
-      20
-    ],
-    "I_free": [
-      7,
       11,
       12,
       14,
+      16,
       17,
       18,
       19,
+      20,
       21,
       22,
       23,
@@ -40,7 +40,7 @@
       30
     ],
     "I_run_broken": [
-      6
+      2
     ]
   },
   "objective": {
@@ -49,16 +49,15 @@
   },
   "urgent": null,
   "keep_decisions": {
-    "5": 1,
-    "6": 0,
-    "9": 1,
-    "10": 1,
+    "2": 0,
+    "3": 1,
+    "4": 1,
+    "8": 1,
     "13": 1,
-    "16": 1,
-    "20": 1
+    "15": 1
   },
   "rem_map": {
-    "6": 31
+    "2": 31
   },
   "schedule": [
     {
@@ -84,7 +83,7 @@
       "op_label": "2",
       "job_id": 1,
       "start": 4.0,
-      "finish": 9.0,
+      "finish": 8.575940142222223,
       "machine": 5,
       "station": 1
     },
@@ -125,13 +124,22 @@
       "station": 6
     },
     {
+      "op_id": 31,
+      "op_label": "2 (cont)",
+      "job_id": 1,
+      "start": 8.575940142222223,
+      "finish": 9.0,
+      "machine": 5,
+      "station": 7
+    },
+    {
       "op_id": 6,
       "op_label": "6",
       "job_id": 2,
       "start": 9.0,
-      "finish": 11.873355999722222,
+      "finish": 13.0,
       "machine": 4,
-      "station": 1
+      "station": 2
     },
     {
       "op_id": 5,
@@ -140,7 +148,7 @@
       "start": 10.0,
       "finish": 13.0,
       "machine": 1,
-      "station": 2
+      "station": 3
     },
     {
       "op_id": 10,
@@ -149,7 +157,7 @@
       "start": 10.0,
       "finish": 13.0,
       "machine": 5,
-      "station": 3
+      "station": 4
     },
     {
       "op_id": 20,
@@ -158,7 +166,7 @@
       "start": 10.0,
       "finish": 13.0,
       "machine": 6,
-      "station": 4
+      "station": 7
     },
     {
       "op_id": 16,
@@ -167,7 +175,7 @@
       "start": 11.0,
       "finish": 15.0,
       "machine": 7,
-      "station": 7
+      "station": 8
     },
     {
       "op_id": 9,
@@ -177,15 +185,6 @@
       "finish": 18.0,
       "machine": 3,
       "station": 6
-    },
-    {
-      "op_id": 31,
-      "op_label": "6 (cont)",
-      "job_id": 2,
-      "start": 11.873355999722222,
-      "finish": 13.0,
-      "machine": 4,
-      "station": 8
     },
     {
       "op_id": 17,
@@ -224,22 +223,13 @@
       "station": 3
     },
     {
-      "op_id": 28,
-      "op_label": "28",
-      "job_id": 8,
-      "start": 14.0,
-      "finish": 20.0,
-      "machine": 5,
-      "station": 4
-    },
-    {
       "op_id": 19,
       "op_label": "19",
       "job_id": 6,
       "start": 17.0,
       "finish": 24.0,
       "machine": 2,
-      "station": 5
+      "station": 4
     },
     {
       "op_id": 24,
@@ -247,8 +237,8 @@
       "job_id": 7,
       "start": 17.0,
       "finish": 24.0,
-      "machine": 6,
-      "station": 7
+      "machine": 5,
+      "station": 5
     },
     {
       "op_id": 11,
@@ -283,7 +273,7 @@
       "job_id": 3,
       "start": 22.0,
       "finish": 27.0,
-      "machine": 5,
+      "machine": 6,
       "station": 2
     },
     {
@@ -293,7 +283,7 @@
       "start": 22.0,
       "finish": 27.0,
       "machine": 1,
-      "station": 4
+      "station": 7
     },
     {
       "op_id": 25,
@@ -302,7 +292,7 @@
       "start": 24.0,
       "finish": 27.0,
       "machine": 2,
-      "station": 5
+      "station": 4
     },
     {
       "op_id": 29,
@@ -311,7 +301,7 @@
       "start": 24.0,
       "finish": 31.0,
       "machine": 3,
-      "station": 6
+      "station": 5
     },
     {
       "op_id": 26,
@@ -332,6 +322,15 @@
       "station": 2
     },
     {
+      "op_id": 28,
+      "op_label": "28",
+      "job_id": 8,
+      "start": 27.0,
+      "finish": 33.0,
+      "machine": 5,
+      "station": 4
+    },
+    {
       "op_id": 30,
       "op_label": "30",
       "job_id": 8,
@@ -341,12 +340,12 @@
       "station": 3
     }
   ],
-  "note": "Reschedule solved by same engine: HeuristicBaseModel.run_heuristic (urgent-priority enabled)",
+  "note": "Reschedule solved by same engine: HeuristicBaseModel.run_heuristic",
   "scenario_name": "Scenario 03 — Station Capacity Disruption (Big Station Offline)",
   "scenario_file": "scenario_03_big_station_offline.json",
   "baseline_file": "base_data_baseline_solution.json",
   "base_data_file": "base_data.json",
-  "reschedule_run_iso_utc": "2026-02-05T23:25:48.814088+00:00",
+  "reschedule_run_iso_utc": "2026-02-08T12:29:27.634697+00:00",
   "disruptions": {
     "unavailable_machines": [],
     "unavailable_stations": [

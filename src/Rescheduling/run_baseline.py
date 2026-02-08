@@ -20,7 +20,7 @@ OUT_BASELINE_DIR = os.path.normpath(
 )
 
 # ---- Gantt split settings (hours) ----
-WINDOW_HOURS = 250.0
+WINDOW_HOURS = 200.0
 OVERLAP_HOURS = 0.0
 
 
@@ -97,10 +97,22 @@ def main():
     plotter = os.path.join(os.path.dirname(__file__), "plot_gantt_baseline.py")
     if os.path.exists(plotter):
         print("📊 Generating BASELINE Gantt charts...")
+
+        # ✅ Don't pass empty sid_override ("") — omit it entirely.
+        cmd = [
+            sys.executable,
+            plotter,
+            out_json,
+            gantt_dir,
+            str(WINDOW_HOURS),
+            str(OVERLAP_HOURS),
+        ]
+
+        print("CMD =", cmd)  # helpful debug
         subprocess.run(
-            [sys.executable, plotter, out_json, gantt_dir, "", str(WINDOW_HOURS), str(OVERLAP_HOURS)],
+            cmd,
             cwd=os.path.dirname(__file__),
-            check=False
+            check=True
         )
 
 
