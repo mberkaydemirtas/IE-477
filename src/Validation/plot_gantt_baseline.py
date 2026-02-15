@@ -5,6 +5,7 @@ import json
 import os
 import re
 import sys
+
 import matplotlib.pyplot as plt
 from matplotlib.patches import Patch
 
@@ -13,12 +14,13 @@ def _load(path: str) -> dict:
     with open(path, "r", encoding="utf-8") as f:
         return json.load(f)
 
+
 def _unique_sorted(vals):
     vals = [v for v in vals if v is not None]
     return sorted(set(vals), key=lambda x: (int(x) if str(x).isdigit() else str(x)))
 
+
 def _norm_res(v):
-    """Normalize resource IDs so '1' and 1 map to same key."""
     if v is None:
         return None
     if isinstance(v, str):
@@ -33,17 +35,21 @@ def _norm_res(v):
         pass
     return v
 
+
 def _make_job_color_map(schedule):
-    jobs = _unique_sorted([
-        r.get("job_id")
-        for r in schedule
-        if r.get("job_id") is not None and int(r.get("job_id")) >= 0
-    ])
+    jobs = _unique_sorted(
+        [
+            r.get("job_id")
+            for r in schedule
+            if r.get("job_id") is not None and int(r.get("job_id")) >= 0
+        ]
+    )
     cmap = plt.get_cmap("tab20")
     job_color = {}
     for idx, j in enumerate(jobs):
         job_color[int(j)] = cmap(idx % 20)
     return job_color
+
 
 def _extract_sid(meta: dict) -> str:
     for key in ["scenario_id", "scenario_file", "scenario_name", "name", "scenario"]:
@@ -59,6 +65,7 @@ def _extract_sid(meta: dict) -> str:
             return m.group(1).zfill(2)
     return "xx"
 
+
 def _time_span(rows):
     if not rows:
         return 0.0, 0.0
@@ -66,8 +73,8 @@ def _time_span(rows):
     tmax = max(float(r["finish"]) for r in rows if r.get("finish") is not None)
     return tmin, tmax
 
+
 def _make_windows(tmin, tmax, window, overlap=0.0):
-    # window <= 0 => single plot
     if window is None or window <= 0 or (tmax - tmin) <= window:
         return [(tmin, tmax)]
     step = max(1e-9, window - max(0.0, overlap))
@@ -77,24 +84,28 @@ def _make_windows(tmin, tmax, window, overlap=0.0):
         e = s + window
         windows.append((s, min(e, tmax)))
         s += step
-        if len(windows) > 5000:  # safety
+        if len(windows) > 5000:
             break
     return windows
 
+
 def _plot_gantt(schedule, key: str, title: str, out_png: str, xlim=None, full_resources=None):
-    rows = [r for r in schedule if (key in r and r.get("start") is not None and r.get("finish") is not None)]
+    rows = [
+        r
+        for r in schedule
+        if (key in r and r.get("start") is not None and r.get("finish") is not None)
+    ]
     if not rows:
-        print(f"⚠️ No rows to plot for {key}.")
+        print(f"WARNING: No rows to plot for {key}.")
         return
 
-    # resources: show all even if unused + normalize
     if full_resources is not None:
         resources = [_norm_res(x) for x in list(full_resources)]
     else:
         resources = _unique_sorted([_norm_res(r.get(key)) for r in rows])
 
     if not resources:
-        print(f"⚠️ No resources found for {key}.")
+        print(f"WARNING: No resources found for {key}.")
         return
 
     idx = {res: i for i, res in enumerate(resources)}
@@ -102,7 +113,8 @@ def _plot_gantt(schedule, key: str, title: str, out_png: str, xlim=None, full_re
 
     rows.sort(key=lambda r: (idx.get(_norm_res(r.get(key)), 10**9), float(r["start"])))
 
-    fig, ax = plt.subplots(figsize=(16, 7))
+    fig_h = max(6.0, min(18.0, 2.5 + 0.45 * len(resources)))
+    fig, ax = plt.subplots(figsize=(16, fig_h))
 
     ws = we = None
     if xlim is not None:
@@ -149,16 +161,17 @@ def _plot_gantt(schedule, key: str, title: str, out_png: str, xlim=None, full_re
     legend_jobs = sorted([j for j in job_color.keys() if j >= 0])
     handles = [Patch(facecolor=job_color[j], edgecolor="black", label=f"Job {j}") for j in legend_jobs]
     if handles:
-        ax.legend(handles=handles, loc="center left", bbox_to_anchor=(1.01, 0.5), title="Color → Job")
+        ax.legend(handles=handles, loc="center left", bbox_to_anchor=(1.01, 0.5), title="Color -> Job")
 
-    plt.tight_layout()
-    fig.savefig(out_png, dpi=200, bbox_inches="tight")
+    fig.subplots_adjust(left=0.07, right=0.82, top=0.90, bottom=0.12)
+    fig.savefig(out_png, dpi=200)
     plt.close(fig)
-    print(f"✅ Saved: {out_png}")
+    print(f"Saved: {out_png}")
+
 
 def main():
     # usage:
-    #   py plot_gantt_baseline.py <baseline_json_path> <outdir> [sid_override] [window_hours] [overlap_hours]
+    # py plot_gantt_baseline.py <baseline_json_path> <outdir> [sid_override] [window_hours] [overlap_hours]
     baseline_path = sys.argv[1] if len(sys.argv) > 1 else "baseline_solution.json"
     outdir = sys.argv[2] if len(sys.argv) > 2 else os.path.dirname(os.path.abspath(baseline_path))
     sid_override = sys.argv[3] if len(sys.argv) > 3 else None
@@ -173,19 +186,30 @@ def main():
 
     os.makedirs(outdir, exist_ok=True)
 
-    rows_machine = [r for r in base_sched if ("machine" in r and r.get("start") is not None and r.get("finish") is not None)]
+    for fn in os.listdir(outdir):
+        if fn.startswith(f"scenario{sid}_baseline_machine_w") and fn.endswith(".png"):
+            os.remove(os.path.join(outdir, fn))
+        if fn.startswith(f"scenario{sid}_baseline_station_w") and fn.endswith(".png"):
+            os.remove(os.path.join(outdir, fn))
+
+    rows_machine = [
+        r
+        for r in base_sched
+        if ("machine" in r and r.get("start") is not None and r.get("finish") is not None)
+    ]
     tmin, tmax = _time_span(rows_machine)
     windows = _make_windows(tmin, tmax, window, overlap)
 
-    full_machines = list(range(1, 13))
-    full_stations = list(range(1, 10))
+    # dynamic resources from baseline json
+    full_machines = base.get("M", None) or _unique_sorted([r.get("machine") for r in base_sched])
+    full_stations = base.get("L", None) or _unique_sorted([r.get("station") for r in base_sched])
 
     for w_i, (ws, we) in enumerate(windows, start=1):
         suffix = f"_w{w_i:02d}_{ws:.1f}-{we:.1f}"
         _plot_gantt(
             base_sched,
             "machine",
-            f"Scenario {sid} — Baseline (Machine Gantt) [{ws:.1f}, {we:.1f}]",
+            f"Scenario {sid} - Baseline (Machine Gantt) [{ws:.1f}, {we:.1f}]",
             os.path.join(outdir, f"scenario{sid}_baseline_machine{suffix}.png"),
             xlim=(ws, we),
             full_resources=full_machines,
@@ -196,11 +220,14 @@ def main():
         _plot_gantt(
             base_sched,
             "station",
-            f"Scenario {sid} — Baseline (Station Gantt) [{ws:.1f}, {we:.1f}]",
+            f"Scenario {sid} - Baseline (Station Gantt) [{ws:.1f}, {we:.1f}]",
             os.path.join(outdir, f"scenario{sid}_baseline_station{suffix}.png"),
             xlim=(ws, we),
             full_resources=full_stations,
         )
 
+
 if __name__ == "__main__":
     main()
+
+

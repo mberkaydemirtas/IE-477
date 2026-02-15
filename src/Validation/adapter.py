@@ -37,6 +37,44 @@ def _deep_merge(a: dict, b: dict) -> dict:
     return out
 
 
+def _to_int_safe(x: Any, default: int = 0) -> int:
+    try:
+        if x is None:
+            return default
+        s = str(x).strip()
+        if s == "":
+            return default
+        return int(float(s))
+    except Exception:
+        return default
+
+
+def _to_float_safe(x: Any, default: float = 0.0) -> float:
+    try:
+        if x is None:
+            return default
+        s = str(x).strip()
+        if s == "":
+            return default
+        return float(s)
+    except Exception:
+        return default
+
+
+def _duration_hhmmss_to_hours(s: Optional[str]) -> float:
+    # "HH:MM:SS" -> hours
+    if not s:
+        return 0.0
+    try:
+        parts = str(s).strip().split(":")
+        if len(parts) != 3:
+            return 0.0
+        hh, mm, ss = parts
+        return float(hh) + float(mm) / 60.0 + float(ss) / 3600.0
+    except Exception:
+        return 0.0
+
+
 def build_data_from_operations(
     operations: List[dict],
     base_meta: Dict[str, Any],
@@ -46,16 +84,23 @@ def build_data_from_operations(
     system_config: Optional[dict] = None,
 ) -> Dict[str, Any]:
     """
-    Builds OLD solver data (J,I,M,L,O_j,M_i,L_i,Pred_i,p_im,r_j,d_j,...) from
-    NEW operations list.
+    Builds solver data (J,I,M,L,O_j,M_i,L_i,Pred_i,p_im,r_j,d_j,...) from operations list.
 
-    IMPORTANT FIXES:
-    - Processing time is NOT inferred from plannedStart/End differences.
-      Only cycleTime (minutes) or default is used.
-    - Operation IDs are stable across baseline/reschedule:
-      uses op["id"] if possible, otherwise a generated unique ID.
-    - Due dates (d_j) are still derived from plannedEndDateTime (job max end),
-      relative to plan_start_iso (as hours).
+    AGREED RULES:
+    - Job grouping: (erpCustomerOrderNumber, erpCustomerOrderItem) as one group.
+      If erpCustomerOrderNumber is empty => fallback group key.
+    - Within a workOrderNumber: operations follow erpOperationItemNumber order (Finish-to-Start).
+    - Within the same customer group: different work orders scheduled by workOrderNumber ascending.
+      We enforce it by linking last op of WO(k) -> first op of WO(k+1).
+    - p_im (hours):
+        setup + (cycleTime * plannedPartCount)   if cycleTime is not null and >0
+        else setup + (plannedEndDateTime - plannedStartDateTime)
+      NOTE: cycleTime assumed MINUTES / part.
+    - plannedEndDateTime is NOT used for due dates.
+    - d_j comes from endDate (group deadline). If multiple, use MIN endDate.
+    - isPlannable == False => anchored: fixed_ops uses plannedStartDateTime/plannedEndDateTime times (relative hours).
+    - IMPORTANT FIX (you requested): M/L universe should match the data if system_config is missing
+      OR does not cover ids in data. We derive M/L from workCenterMachineId/workCenterId.
     """
 
     # merge system_config -> base_meta (system_config first, then base_meta overrides)
@@ -67,19 +112,66 @@ def build_data_from_operations(
 
     plan_start_dt = _parse_iso(plan_start_iso) or datetime.now(timezone.utc)
 
-    # --- system config / base meta ---
-    machine_ids = _deep_get(base_meta, ["machines", "machine_ids"], None) or base_meta.get("M")
-    station_ids = _deep_get(base_meta, ["stations", "station_ids"], None) or base_meta.get("L")
+    # -------------------------
+    # Filter only OPERATION dicts
+    # -------------------------
+    ops_in: List[dict] = []
+    for op in operations or []:
+        if isinstance(op, dict) and (op.get("objectType") in (None, "OPERATION")):
+            ops_in.append(op)
 
-    if not machine_ids:
-        machine_ids = [1, 2, 3, 4]
-    if not station_ids:
-        station_ids = [1, 2, 3, 4]
+    # -------------------------
+    # Build M / L universe
+    # -------------------------
+    machine_ids_cfg = _deep_get(base_meta, ["machines", "machine_ids"], None) or base_meta.get("M")
+    station_ids_cfg = _deep_get(base_meta, ["stations", "station_ids"], None) or base_meta.get("L")
 
-    M = [int(x) for x in machine_ids]
-    L = [int(x) for x in station_ids]
+    data_machine_ids = sorted({
+        _to_int_safe(o.get("workCenterMachineId"), 0)
+        for o in ops_in
+        if _to_int_safe(o.get("workCenterMachineId"), 0) > 0
+    })
+    data_station_ids = sorted({
+        _to_int_safe(o.get("workCenterId"), 0)
+        for o in ops_in
+        if _to_int_safe(o.get("workCenterId"), 0) > 0
+    })
 
-    # station type -> big/small
+    # if config missing => use data ids (or fallback)
+    if not machine_ids_cfg:
+        machine_ids_cfg = data_machine_ids or [1, 2, 3, 4]
+    if not station_ids_cfg:
+        station_ids_cfg = data_station_ids or [1, 2, 3, 4]
+
+    # if config exists but does NOT cover data ids => expand with data ids
+    try:
+        cfgM = sorted({int(x) for x in (machine_ids_cfg or [])})
+    except Exception:
+        cfgM = []
+    try:
+        cfgL = sorted({int(x) for x in (station_ids_cfg or [])})
+    except Exception:
+        cfgL = []
+
+    if data_machine_ids:
+        missingM = [m for m in data_machine_ids if m not in cfgM]
+        if missingM:
+            cfgM = sorted(set(cfgM) | set(data_machine_ids))
+    if data_station_ids:
+        missingL = [l for l in data_station_ids if l not in cfgL]
+        if missingL:
+            cfgL = sorted(set(cfgL) | set(data_station_ids))
+
+    M = cfgM if cfgM else (data_machine_ids or [1, 2, 3, 4])
+    L = cfgL if cfgL else (data_station_ids or [1, 2, 3, 4])
+
+    M = [int(x) for x in M]
+    L = [int(x) for x in L]
+
+    M_set = set(int(x) for x in M)
+    L_set = set(int(x) for x in L)
+
+    # station type -> big/small (kept for compatibility)
     station_types = _deep_get(base_meta, ["stations", "station_types"], {}) or {}
     L_big: List[int] = []
     L_small: List[int] = []
@@ -98,22 +190,30 @@ def build_data_from_operations(
     allow_all_m = bool(defaults.get("allow_all_machines_if_missing", True))
     allow_all_l = bool(defaults.get("allow_all_stations_if_missing", True))
     default_pt_hours = float(defaults.get("default_processing_time_hours", 1.0))
+    min_pt_hours = float(defaults.get("min_processing_time_hours", 1.0 / 60.0))  # 1 minute default
 
-    # --- group ops by parentId -> job ---
-    groups: Dict[int, List[dict]] = {}
-    for op in operations:
-        pid = op.get("parentId", None)
-        if pid is None:
-            pid = op.get("workOrderNumber", None)
-        try:
-            pid_int = int(pid) if pid is not None else -1
-        except Exception:
-            pid_int = -1
-        groups.setdefault(pid_int, []).append(op)
+    # -------------------------
+    # Grouping (Job definition)
+    # -------------------------
+    def _customer_key(op: dict) -> Tuple[str, str]:
+        co = str(op.get("erpCustomerOrderNumber") or "").strip()
+        item = str(op.get("erpCustomerOrderItem") or "").strip()
 
-    parent_keys = sorted(groups.keys())
-    job_of_parent = {pk: idx + 1 for idx, pk in enumerate(parent_keys)}
-    J = list(range(1, len(parent_keys) + 1))
+        # fallback: if customer order missing, group by (NO_CO, partNumber)
+        if co == "":
+            pn = str(op.get("partNumber") or "NO_PART").strip()
+            return ("NO_CO", pn)
+        if item == "":
+            item = "0"
+        return (co, item)
+
+    groups: Dict[Tuple[str, str], List[dict]] = {}
+    for op in ops_in:
+        groups.setdefault(_customer_key(op), []).append(op)
+
+    group_keys = sorted(groups.keys(), key=lambda k: (k[0], k[1]))
+    job_of_group = {gk: idx + 1 for idx, gk in enumerate(group_keys)}
+    J = list(range(1, len(group_keys) + 1))
 
     # outputs
     I: List[int] = []
@@ -122,8 +222,9 @@ def build_data_from_operations(
     M_i: Dict[int, List[int]] = {}
     L_i: Dict[int, List[int]] = {}
     beta_i: Dict[int, int] = {}
-    p_im: Dict[Tuple[int, int], float] = {}
     Pred_i: Dict[int, List[int]] = {}
+
+    p_im: Dict[Tuple[int, int], float] = {}
 
     r_j: Dict[int, float] = {}
     d_j: Dict[int, float] = {}
@@ -132,7 +233,9 @@ def build_data_from_operations(
     t_grind_j: Dict[int, float] = {}
     t_paint_j: Dict[int, float] = {}
 
-    # stable op ids
+    # anchored ops
+    fixed_ops: Dict[int, Dict[str, Any]] = {}
+
     used_ids: Set[int] = set()
 
     def _reserve_id(candidate: Optional[Any]) -> Optional[int]:
@@ -149,7 +252,6 @@ def build_data_from_operations(
         used_ids.add(cid)
         return cid
 
-    # fallback id generator
     fallback_next = 1
 
     def _gen_fallback_id() -> int:
@@ -159,108 +261,185 @@ def build_data_from_operations(
         used_ids.add(fallback_next)
         return fallback_next
 
-    for pk in parent_keys:
-        j = job_of_parent[pk]
-        ops = groups[pk]
+    def _hours_from_plan(dt: datetime) -> float:
+        return max(0.0, (dt - plan_start_dt).total_seconds() / 3600.0)
 
-        # keep old plan sorting (optional)
-        def _sort_key(o):
-            dt = _parse_iso(o.get("plannedStartDateTime"))
-            return dt or datetime(1970, 1, 1, tzinfo=timezone.utc)
+    def _compute_pt_hours(op: dict) -> float:
+        setup_h = _duration_hhmmss_to_hours(op.get("plannedSetupDuration"))
+        qty = _to_int_safe(op.get("plannedPartCount"), default=0)
 
-        ops_sorted = sorted(ops, key=_sort_key)
+        ct = op.get("cycleTime", None)
+        if ct is not None:
+            ct_val = _to_float_safe(ct, default=0.0)
+            if ct_val > 0.0 and qty > 0:
+                # cycleTime assumed minutes/part
+                return max(setup_h + (ct_val * qty) / 60.0, min_pt_hours)
+
+        st = _parse_iso(op.get("plannedStartDateTime"))
+        en = _parse_iso(op.get("plannedEndDateTime"))
+        if st and en:
+            win_h = (en - st).total_seconds() / 3600.0
+            if win_h < 0:
+                win_h = 0.0
+            return max(setup_h + win_h, min_pt_hours)
+
+        return max(setup_h + default_pt_hours, min_pt_hours)
+
+    def _machine_candidates(op: dict) -> List[int]:
+        # primary: workCenterMachineId (as a specific machine id IF within M universe)
+        mid = op.get("workCenterMachineId", None)
+        if mid is not None:
+            m = _to_int_safe(mid, default=0)
+            if m > 0 and m in M_set:
+                return [m]
+
+        # fallback: explicit candidates
+        mc = op.get("machineCandidates", None) or op.get("feasible_machines", None)
+        if mc:
+            try:
+                out = sorted({int(x) for x in mc if _to_int_safe(x, 0) in M_set})
+                if out:
+                    return out
+            except Exception:
+                pass
+
+        return list(M) if allow_all_m else []
+
+    def _station_candidates(op: dict) -> List[int]:
+        sid = op.get("workCenterId", None)
+        if sid is not None:
+            l = _to_int_safe(sid, default=0)
+            if l > 0 and l in L_set:
+                return [l]
+
+        sc = op.get("stationCandidates", None) or op.get("feasible_stations", None)
+        if sc:
+            try:
+                out = sorted({int(x) for x in sc if _to_int_safe(x, 0) in L_set})
+                if out:
+                    return out
+            except Exception:
+                pass
+
+        return list(L) if allow_all_l else []
+
+    # -------------------------
+    # Build each job/group
+    # -------------------------
+    for gk in group_keys:
+        j = job_of_group[gk]
+        ops = groups[gk]
+
+        by_wo: Dict[str, List[dict]] = {}
+        for op in ops:
+            wo = str(op.get("workOrderNumber") or "").strip()
+            if wo == "":
+                wo = "NO_WO"
+            by_wo.setdefault(wo, []).append(op)
+
+        def _wo_sort_key(wo: str):
+            return (_to_int_safe(wo, default=10**18), wo)
+
+        wo_keys = sorted(by_wo.keys(), key=_wo_sort_key)
 
         job_op_ids: List[int] = []
-        start_times: List[datetime] = []
-        end_times: List[datetime] = []
+        group_start_times: List[datetime] = []
+        group_due_times: List[datetime] = []
 
-        for op in ops_sorted:
-            # ✅ stable operation id
-            oid = _reserve_id(op.get("id"))
-            if oid is None:
-                oid = _gen_fallback_id()
+        last_op_of_prev_wo: Optional[int] = None
 
-            I.append(oid)
-            job_op_ids.append(oid)
+        for wo in wo_keys:
+            wo_ops = by_wo[wo]
 
-            # feasible machines
-            mc = op.get("machineCandidates", None)
-            if mc is None:
-                mc = op.get("feasible_machines", None)
-            if mc is None and allow_all_m:
-                mc = M
-            mc_list = [int(x) for x in (mc or [])]
-            if not mc_list:
-                mc_list = list(M)
-            M_i[oid] = mc_list
+            def _op_item_sort_key(o: dict):
+                return (
+                    _to_int_safe(o.get("erpOperationItemNumber"), default=10**9),
+                    _to_int_safe(o.get("id"), default=10**9),
+                )
 
-            # feasible stations
-            sc = op.get("stationCandidates", None)
-            if sc is None:
-                sc = op.get("feasible_stations", None)
-            if sc is None and allow_all_l:
-                sc = L
-            sc_list = [int(x) for x in (sc or [])]
-            if not sc_list:
-                sc_list = list(L)
-            L_i[oid] = sc_list
+            wo_ops_sorted = sorted(wo_ops, key=_op_item_sort_key)
+            wo_op_ids: List[int] = []
 
-            # BIG requirement
-            ssr = str(op.get("stationSizeRequirement", "ANY")).upper()
-            beta_i[oid] = 1 if ssr == "BIG" else 0
+            for op in wo_ops_sorted:
+                oid = _reserve_id(op.get("id"))
+                if oid is None:
+                    oid = _gen_fallback_id()
 
-            # --- processing time (hours): ONLY cycleTime or default ---
-            pt_hours = None
-            if op.get("cycleTime", None) is not None:
-                try:
-                    pt_hours = float(op["cycleTime"]) / 60.0
-                except Exception:
-                    pt_hours = None
+                I.append(oid)
+                job_op_ids.append(oid)
+                wo_op_ids.append(oid)
 
-            if pt_hours is None or pt_hours <= 0:
-                pt_hours = default_pt_hours
+                M_i[oid] = _machine_candidates(op)
+                L_i[oid] = _station_candidates(op)
 
-            for m in M_i[oid]:
-                p_im[(oid, int(m))] = float(pt_hours)
+                ssr = str(op.get("stationSizeRequirement", "ANY")).upper()
+                beta_i[oid] = 1 if ssr == "BIG" else 0
 
-            # collect planned times for r/d only
-            st = _parse_iso(op.get("plannedStartDateTime"))
-            en = _parse_iso(op.get("plannedEndDateTime"))
-            if st:
-                start_times.append(st)
-            if en:
-                end_times.append(en)
+                pt_h = _compute_pt_hours(op)
+                for m in M_i[oid]:
+                    p_im[(oid, int(m))] = float(pt_h)
 
-            Pred_i[oid] = []
+                Pred_i[oid] = []
 
-        # chain precedence within job (temporary rule)
-        for k in range(1, len(job_op_ids)):
-            Pred_i[job_op_ids[k]].append(job_op_ids[k - 1])
+                st = _parse_iso(op.get("plannedStartDateTime"))
+                if st:
+                    group_start_times.append(st)
+
+                due_dt = _parse_iso(op.get("endDate"))
+                if due_dt:
+                    group_due_times.append(due_dt)
+
+                is_plannable = op.get("isPlannable", True)
+                if is_plannable is False:
+                    st2 = _parse_iso(op.get("plannedStartDateTime"))
+                    en2 = _parse_iso(op.get("plannedEndDateTime"))
+                    if st2 and en2:
+                        row: Dict[str, Any] = {
+                            "start": _hours_from_plan(st2),
+                            "finish": _hours_from_plan(en2),
+                        }
+                        if M_i[oid]:
+                            row["machine"] = int(M_i[oid][0])
+                        if L_i[oid]:
+                            row["station"] = int(L_i[oid][0])
+                        fixed_ops[oid] = row
+
+            for k in range(1, len(wo_op_ids)):
+                Pred_i[wo_op_ids[k]].append(wo_op_ids[k - 1])
+
+            if last_op_of_prev_wo is not None and wo_op_ids:
+                Pred_i[wo_op_ids[0]].append(last_op_of_prev_wo)
+
+            if wo_op_ids:
+                last_op_of_prev_wo = wo_op_ids[-1]
 
         O_j[j] = job_op_ids
 
-        # release/due times from planned windows (NOT duration)
-        if start_times:
-            rj = max(0.0, (min(start_times) - plan_start_dt).total_seconds() / 3600.0)
+        if group_start_times:
+            rj = _hours_from_plan(min(group_start_times))
         else:
             rj = 0.0
-
-        if end_times:
-            dj = max(0.0, (max(end_times) - plan_start_dt).total_seconds() / 3600.0)
-        else:
-            # fallback: release + sum of default durations
-            dj = rj + sum(p_im[(opx, M_i[opx][0])] for opx in job_op_ids)
-
         r_j[j] = float(rj)
+
+        if group_due_times:
+            dj = _hours_from_plan(min(group_due_times))
+        else:
+            if job_op_ids:
+                dj = rj + sum(
+                    p_im[(opx, M_i[opx][0])]
+                    for opx in job_op_ids
+                    if M_i.get(opx)
+                )
+            else:
+                dj = rj
         d_j[j] = float(dj)
 
-        # post-ops defaults (you can derive later from op names if needed)
         g_j[j] = 0
         p_flag_j[j] = 0
         t_grind_j[j] = 0.0
         t_paint_j[j] = 0.0
 
-    # machine types
+    # machine types (keep compatibility)
     machine_type = base_meta.get("machine_type", None)
     if not isinstance(machine_type, dict):
         mt = _deep_get(base_meta, ["machines", "machine_types"], {}) or {}
@@ -272,7 +451,7 @@ def build_data_from_operations(
     out = dict(base_meta)
     out.update({
         "J": J,
-        "I": sorted(I),
+        "I": sorted([int(x) for x in I]),
         "M": M,
         "L": L,
         "L_big": L_big,
@@ -285,7 +464,6 @@ def build_data_from_operations(
         "Pred_i": Pred_i,
         "beta_i": beta_i,
 
-        # keep JSON-friendly p_im keys
         "p_im": {f"{i},{m}": p for (i, m), p in p_im.items()},
 
         "r_j": r_j,
@@ -296,6 +474,7 @@ def build_data_from_operations(
         "t_grind_j": t_grind_j,
         "t_paint_j": t_paint_j,
 
+        "fixed_ops": fixed_ops,  # anchored ops
         "default_processing_time_hours": default_pt_hours,
         "plan_calendar": plan_calendar if isinstance(plan_calendar, dict) else {"utc_offset": "+03:00"},
     })

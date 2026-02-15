@@ -84,7 +84,7 @@ def _make_windows(tmin, tmax, window, overlap=0.0):
 def _plot_gantt(schedule, key: str, title: str, out_png: str, t0=None, xlim=None, full_resources=None):
     rows = [r for r in schedule if (key in r and r.get("start") is not None and r.get("finish") is not None)]
     if not rows:
-        print(f"⚠️ No rows to plot for {key}.")
+        print(f"WARNING: No rows to plot for {key}.")
         return
 
     if full_resources is not None:
@@ -93,7 +93,7 @@ def _plot_gantt(schedule, key: str, title: str, out_png: str, t0=None, xlim=None
         resources = _unique_sorted([_norm_res(r.get(key)) for r in rows])
 
     if not resources:
-        print(f"⚠️ No resources found for {key}.")
+        print(f"WARNING: No resources found for {key}.")
         return
 
     idx = {res: i for i, res in enumerate(resources)}
@@ -101,7 +101,8 @@ def _plot_gantt(schedule, key: str, title: str, out_png: str, t0=None, xlim=None
 
     rows.sort(key=lambda r: (idx.get(_norm_res(r.get(key)), 10**9), float(r["start"])))
 
-    fig, ax = plt.subplots(figsize=(16, 7))
+    fig_h = max(6.0, min(18.0, 2.5 + 0.45 * len(resources)))
+    fig, ax = plt.subplots(figsize=(16, fig_h))
 
     ws = we = None
     if xlim is not None:
@@ -156,12 +157,12 @@ def _plot_gantt(schedule, key: str, title: str, out_png: str, t0=None, xlim=None
     legend_jobs = sorted([j for j in job_color.keys() if j >= 0])
     handles = [Patch(facecolor=job_color[j], edgecolor="black", label=f"Job {j}") for j in legend_jobs]
     if handles:
-        ax.legend(handles=handles, loc="center left", bbox_to_anchor=(1.01, 0.5), title="Color → Job")
+        ax.legend(handles=handles, loc="center left", bbox_to_anchor=(1.01, 0.5), title="Color -> Job")
 
-    plt.tight_layout()
-    fig.savefig(out_png, dpi=200, bbox_inches="tight")
+    fig.subplots_adjust(left=0.07, right=0.82, top=0.90, bottom=0.12)
+    fig.savefig(out_png, dpi=200)
     plt.close(fig)
-    print(f"✅ Saved: {out_png}")
+    print(f"Saved: {out_png}")
 
 def main():
     # usage:
@@ -174,7 +175,7 @@ def main():
     overlap = float(sys.argv[5]) if len(sys.argv) > 5 else 0.0
 
     if not os.path.exists(res_path):
-        print(f"❌ reschedule file not found: {res_path}")
+        print(f"ERROR: reschedule file not found: {res_path}")
         sys.exit(1)
 
     res = _load(res_path)
@@ -182,6 +183,12 @@ def main():
     sid = sid_override.zfill(2) if (sid_override and str(sid_override).isdigit()) else _extract_sid(res)
 
     os.makedirs(outdir, exist_ok=True)
+
+    for fn in os.listdir(outdir):
+        if fn.startswith(f"scenario{sid}_reschedule_machine_w") and fn.endswith(".png"):
+            os.remove(os.path.join(outdir, fn))
+        if fn.startswith(f"scenario{sid}_reschedule_station_w") and fn.endswith(".png"):
+            os.remove(os.path.join(outdir, fn))
 
     res_sched = res.get("schedule", [])
     t0 = res.get("t0", None)
@@ -198,7 +205,7 @@ def main():
         _plot_gantt(
             res_sched,
             "machine",
-            f"Scenario {sid} — Reschedule (Machine Gantt) [{ws:.1f}, {we:.1f}]",
+            f"Scenario {sid} - Reschedule (Machine Gantt) [{ws:.1f}, {we:.1f}]",
             os.path.join(outdir, f"scenario{sid}_reschedule_machine{suffix}.png"),
             t0=t0,
             xlim=(ws, we),
@@ -210,7 +217,7 @@ def main():
         _plot_gantt(
             res_sched,
             "station",
-            f"Scenario {sid} — Reschedule (Station Gantt) [{ws:.1f}, {we:.1f}]",
+            f"Scenario {sid} - Reschedule (Station Gantt) [{ws:.1f}, {we:.1f}]",
             os.path.join(outdir, f"scenario{sid}_reschedule_station{suffix}.png"),
             t0=t0,
             xlim=(ws, we),
@@ -219,3 +226,5 @@ def main():
 
 if __name__ == "__main__":
     main()
+
+

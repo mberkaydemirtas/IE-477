@@ -216,7 +216,6 @@ def normalize_data(data: Dict[str, Any]) -> Dict[str, Any]:
         if j not in out["t_paint_j"]:
             out["t_paint_j"][j] = 0.0
 
-    # optional default ptime for urgent fallback
     if "default_processing_time_hours" not in out:
         out["default_processing_time_hours"] = 1.0
 
@@ -311,7 +310,11 @@ def solve_baseline(
         "x_old": x_old,
         "y_old": y_old,
         "schedule": schedule,
-        "note": "Baseline solved by HeuristicBaseModel.run_heuristic"
+        "note": "Baseline solved by HeuristicBaseModel.run_heuristic",
+
+        # ✅ NEW: include resource universes so gantt can show correct machines/stations
+        "M": list(data.get("M", [])),
+        "L": list(data.get("L", [])),
     }
 
 
@@ -320,10 +323,6 @@ def solve_baseline(
 # ==========================================================
 
 def classify_ops_by_t0(I: List[int], S_old: Dict[int, float], C_old: Dict[int, float], t0: float):
-    """
-    Robust classification:
-    - If an op is missing in baseline (no S_old/C_old), treat as FREE (new/unseen op).
-    """
     done = []
     run = []
     free = []
@@ -331,7 +330,6 @@ def classify_ops_by_t0(I: List[int], S_old: Dict[int, float], C_old: Dict[int, f
     for i in I:
         ii = int(i)
 
-        # baseline doesn't know this op -> treat as not started
         if ii not in S_old or ii not in C_old:
             free.append(ii)
             continue
@@ -354,11 +352,6 @@ def classify_ops_by_t0(I: List[int], S_old: Dict[int, float], C_old: Dict[int, f
 # ==========================================================
 
 def add_urgent_job_from_payload(data: Dict[str, Any], t0: float, urgent_payload: dict) -> Dict[str, Any]:
-    """
-    Accepts BOTH formats:
-    - old: ops[*].processing_time_by_machine / feasible_machines / feasible_stations
-    - new: ops[*].cycleTime (minutes), machineCandidates, stationCandidates, stationSizeRequirement
-    """
     uj = urgent_payload.get("urgent_job", urgent_payload)
 
     data = normalize_data(data)
@@ -426,7 +419,6 @@ def add_urgent_job_from_payload(data: Dict[str, Any], t0: float, urgent_payload:
     for op_def in ops_payload:
         op_id = int(op_def["op_id"])
 
-        # ----- stations -----
         feasL = op_def.get("feasible_stations", None)
         if feasL is None:
             feasL = op_def.get("stationCandidates", None)
@@ -436,7 +428,6 @@ def add_urgent_job_from_payload(data: Dict[str, Any], t0: float, urgent_payload:
         if not L_i[op_id]:
             L_i[op_id] = list(L)
 
-        # ----- machines -----
         feasM_user = op_def.get("feasible_machines", None)
         if feasM_user is None:
             feasM_user = op_def.get("machineCandidates", None)
@@ -449,7 +440,6 @@ def add_urgent_job_from_payload(data: Dict[str, Any], t0: float, urgent_payload:
             raise ValueError(f"urgent op {op_id}: machine candidates empty")
         M_i[op_id] = list(feasM_final)
 
-        # ----- ptime -----
         pt = op_def.get("processing_time_by_machine", None)
         if not pt:
             cycle_time = op_def.get("cycleTime", None)  # minutes
@@ -472,7 +462,6 @@ def add_urgent_job_from_payload(data: Dict[str, Any], t0: float, urgent_payload:
                     raise ValueError(f"urgent op {op_id}: missing ptime for machine {m}")
                 p_im[(op_id, int(m))] = float(val)
 
-        # ----- big/small requirement -----
         ssr = (op_def.get("stationSizeRequirement", None) or "").strip().upper()
         if ssr == "BIG":
             beta_i[op_id] = 1
@@ -565,7 +554,6 @@ def add_split_remainders_for_running_ops(
     beta_i2 = dict(beta_i)
 
     def old_machine(i: int) -> Optional[int]:
-        # NOTE: your x_old currently stored as {"i,m": 1} strings in baseline.
         for kk, v in (x_old or {}).items():
             if int(v) != 1:
                 continue
@@ -686,9 +674,6 @@ def solve_reschedule(
             sch_machine[op_id] = int(r["machine"])
         if r.get("station", None) is not None:
             sch_station[op_id] = int(r["station"])
-
-    # x_old/y_old stored as "i,m" strings -> already ok in add_split_remainders_for_running_ops
-    # keep only schedule dicts above
 
     badM = set(unavailable_machines)
     badL = set(unavailable_stations)
