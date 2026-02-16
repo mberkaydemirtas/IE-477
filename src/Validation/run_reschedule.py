@@ -23,6 +23,7 @@ REFERENCE_BASELINE_SOLUTION = os.path.join(OUT_BASELINE_DIR, "base_data_baseline
 
 WINDOW_HOURS = 250.0
 OVERLAP_HOURS = 0.0
+DEFAULT_REFERENCE_NOW_ISO = "2026-01-30T00:00:00+00:00"
 
 
 def _load_json(path: str):
@@ -218,6 +219,8 @@ def main():
 
     rb = _res_block(scn)
     t_now_iso = rb.get("t_now_iso") or scn.get("t_now_iso") or rb.get("reschedule_time_iso") or scn.get("reschedule_time_iso")
+    if not t_now_iso:
+        t_now_iso = DEFAULT_REFERENCE_NOW_ISO
     if t_now_iso:
         print("t_now_iso:", t_now_iso)
 

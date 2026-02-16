@@ -264,10 +264,11 @@ def solve_baseline(
     plan_calendar = plan_calendar or {"utc_offset": "+03:00"}
 
     data = normalize_data(data)
+    fixed_ops = data.get("fixed_ops", {}) if isinstance(data.get("fixed_ops"), dict) else {}
     res: HeuristicResult = run_heuristic(
         data,
         k1=float(k1),
-        fixed_ops=None,
+        fixed_ops=fixed_ops,
         start_time_floor=0.0,
         unavailable_machines=None,
         unavailable_stations=None,
@@ -315,6 +316,8 @@ def solve_baseline(
         # ✅ NEW: include resource universes so gantt can show correct machines/stations
         "M": list(data.get("M", [])),
         "L": list(data.get("L", [])),
+        "machine_label_map": dict(data.get("machine_label_map", {}) or {}),
+        "station_label_map": dict(data.get("station_label_map", {}) or {}),
     }
 
 
@@ -697,11 +700,28 @@ def solve_reschedule(
                 urgent_machines |= set(int(x) for x in mc)
 
     fixed_ops: Dict[int, Dict[str, Any]] = {}
+    anchored_ops = set()
+
+    # Keep adapter-anchored operations (e.g. fason ops) at their planned timestamps.
+    for op_id, row in (data_base.get("fixed_ops", {}) or {}).items():
+        try:
+            i = int(op_id)
+            fixed_ops[i] = {
+                "start": float(row["start"]),
+                "finish": float(row["finish"]),
+                "machine": int(row["machine"]) if row.get("machine", None) is not None else None,
+                "station": int(row["station"]) if row.get("station", None) is not None else None,
+            }
+            anchored_ops.add(i)
+        except Exception:
+            continue
     keep_decisions: Dict[int, int] = {}
     I_run_broken: List[int] = []
 
     for i in I_done:
         i = int(i)
+        if i in anchored_ops:
+            continue
         fixed_ops[i] = {
             "start": float(S_old[i]),
             "finish": float(C_old[i]),
@@ -711,6 +731,9 @@ def solve_reschedule(
 
     for i in I_run:
         i = int(i)
+        if i in anchored_ops:
+            keep_decisions[i] = 1
+            continue
         m0 = sch_machine.get(i, None)
         l0 = sch_station.get(i, None)
 
@@ -780,7 +803,11 @@ def solve_reschedule(
         "keep_decisions": {int(k): int(v) for k, v in keep_decisions.items()},
         "rem_map": {int(k): int(v) for k, v in rem_map.items()},
         "schedule": schedule,
-        "note": "Reschedule solved by same engine: HeuristicBaseModel.run_heuristic"
+        "note": "Reschedule solved by same engine: HeuristicBaseModel.run_heuristic",
+        "M": list(data2.get("M", [])),
+        "L": list(data2.get("L", [])),
+        "machine_label_map": dict(data2.get("machine_label_map", {}) or {}),
+        "station_label_map": dict(data2.get("station_label_map", {}) or {}),
     }
 
 def solve_reschedule_open_source(*args, **kwargs):

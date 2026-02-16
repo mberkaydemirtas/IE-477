@@ -75,6 +75,12 @@ def _duration_hhmmss_to_hours(s: Optional[str]) -> float:
         return 0.0
 
 
+def _is_fason_op(op: dict) -> bool:
+    machine_code = str(op.get("workCenterMachineCode") or "").strip().upper()
+    machine_name = str(op.get("workCenterName") or "").strip().upper()
+    return ("FASON" in machine_code) or ("FASON" in machine_name)
+
+
 def build_data_from_operations(
     operations: List[dict],
     base_meta: Dict[str, Any],
@@ -171,6 +177,28 @@ def build_data_from_operations(
     M_set = set(int(x) for x in M)
     L_set = set(int(x) for x in L)
 
+    # Each fason operation gets its own dedicated machine and station ids.
+    fason_machine_of_raw_op: Dict[int, int] = {}
+    fason_station_of_raw_op: Dict[int, int] = {}
+    next_fason_machine = (max(M) + 1) if M else 1
+    next_fason_station = (max(L) + 1) if L else 1
+    for op in ops_in:
+        if not _is_fason_op(op):
+            continue
+        raw_op_id = _to_int_safe(op.get("id"), 0)
+        if raw_op_id <= 0 or raw_op_id in fason_machine_of_raw_op:
+            continue
+
+        fason_machine_of_raw_op[raw_op_id] = next_fason_machine
+        M.append(next_fason_machine)
+        M_set.add(next_fason_machine)
+        next_fason_machine += 1
+
+        fason_station_of_raw_op[raw_op_id] = next_fason_station
+        L.append(next_fason_station)
+        L_set.add(next_fason_station)
+        next_fason_station += 1
+
     # station type -> big/small (kept for compatibility)
     station_types = _deep_get(base_meta, ["stations", "station_types"], {}) or {}
     L_big: List[int] = []
@@ -191,6 +219,8 @@ def build_data_from_operations(
     allow_all_l = bool(defaults.get("allow_all_stations_if_missing", True))
     default_pt_hours = float(defaults.get("default_processing_time_hours", 1.0))
     min_pt_hours = float(defaults.get("min_processing_time_hours", 1.0 / 60.0))  # 1 minute default
+    use_planned_release_times = bool(base_meta.get("use_planned_release_times", False))
+    internal_machines = [m for m in range(1, 13) if m in M_set]
 
     # -------------------------
     # Grouping (Job definition)
@@ -269,8 +299,13 @@ def build_data_from_operations(
         qty = _to_int_safe(op.get("plannedPartCount"), default=0)
 
         ct = op.get("cycleTime", None)
+        ct_val = 0.0
+        has_ct = False
         if ct is not None:
-            ct_val = _to_float_safe(ct, default=0.0)
+            sct = str(ct).strip()
+            if sct != "":
+                has_ct = True
+                ct_val = _to_float_safe(ct, default=0.0)
             if ct_val > 0.0 and qty > 0:
                 # cycleTime assumed minutes/part
                 return max(setup_h + (ct_val * qty) / 60.0, min_pt_hours)
@@ -278,34 +313,50 @@ def build_data_from_operations(
         st = _parse_iso(op.get("plannedStartDateTime"))
         en = _parse_iso(op.get("plannedEndDateTime"))
         if st and en:
-            win_h = (en - st).total_seconds() / 3600.0
+            # If cycle time is zero/empty and planned window is zero-ish, force 2 days.
+            win_s = (en - st).total_seconds()
+            if (not has_ct or ct_val <= 0.0) and abs(win_s) <= 1.0:
+                return 48.0
+            win_h = win_s / 3600.0
             if win_h < 0:
                 win_h = 0.0
             return max(setup_h + win_h, min_pt_hours)
 
         return max(setup_h + default_pt_hours, min_pt_hours)
 
-    def _machine_candidates(op: dict) -> List[int]:
-        # primary: workCenterMachineId (as a specific machine id IF within M universe)
+    def _machine_candidates(op: dict, op_id: int) -> List[int]:
+        # Fason operations must never consume internal machine capacity.
+        if _is_fason_op(op):
+            fm = fason_machine_of_raw_op.get(int(op_id))
+            if fm is not None:
+                return [int(fm)]
+
+        # Non-fason operations are restricted to internal machines 1..12.
         mid = op.get("workCenterMachineId", None)
         if mid is not None:
             m = _to_int_safe(mid, default=0)
-            if m > 0 and m in M_set:
+            if m > 0 and m in internal_machines:
                 return [m]
 
         # fallback: explicit candidates
         mc = op.get("machineCandidates", None) or op.get("feasible_machines", None)
         if mc:
             try:
-                out = sorted({int(x) for x in mc if _to_int_safe(x, 0) in M_set})
+                out = sorted({int(x) for x in mc if _to_int_safe(x, 0) in internal_machines})
                 if out:
                     return out
             except Exception:
                 pass
 
-        return list(M) if allow_all_m else []
+        return list(internal_machines) if allow_all_m else []
 
     def _station_candidates(op: dict) -> List[int]:
+        if _is_fason_op(op):
+            raw_op_id = _to_int_safe(op.get("id"), 0)
+            fs = fason_station_of_raw_op.get(int(raw_op_id))
+            if fs is not None:
+                return [int(fs)]
+
         sid = op.get("workCenterId", None)
         if sid is not None:
             l = _to_int_safe(sid, default=0)
@@ -346,7 +397,7 @@ def build_data_from_operations(
         group_start_times: List[datetime] = []
         group_due_times: List[datetime] = []
 
-        last_op_of_prev_wo: Optional[int] = None
+        last_op_of_prev_wo: Optional[Tuple[int, int, bool]] = None
 
         for wo in wo_keys:
             wo_ops = by_wo[wo]
@@ -359,6 +410,7 @@ def build_data_from_operations(
 
             wo_ops_sorted = sorted(wo_ops, key=_op_item_sort_key)
             wo_op_ids: List[int] = []
+            wo_op_meta: List[Tuple[int, int, bool]] = []  # (op_id, seq, is_fason)
 
             for op in wo_ops_sorted:
                 oid = _reserve_id(op.get("id"))
@@ -368,8 +420,11 @@ def build_data_from_operations(
                 I.append(oid)
                 job_op_ids.append(oid)
                 wo_op_ids.append(oid)
+                seq_no = _to_int_safe(op.get("erpOperationItemNumber"), default=10**9)
+                is_fason = _is_fason_op(op)
+                wo_op_meta.append((oid, seq_no, is_fason))
 
-                M_i[oid] = _machine_candidates(op)
+                M_i[oid] = _machine_candidates(op, oid)
                 L_i[oid] = _station_candidates(op)
 
                 ssr = str(op.get("stationSizeRequirement", "ANY")).upper()
@@ -404,18 +459,29 @@ def build_data_from_operations(
                             row["station"] = int(L_i[oid][0])
                         fixed_ops[oid] = row
 
-            for k in range(1, len(wo_op_ids)):
-                Pred_i[wo_op_ids[k]].append(wo_op_ids[k - 1])
+            # Default chain only for increasing sequence numbers.
+            # If both adjacent ops are fason, don't force precedence.
+            for k in range(1, len(wo_op_meta)):
+                prev_id, prev_seq, prev_fason = wo_op_meta[k - 1]
+                cur_id, cur_seq, cur_fason = wo_op_meta[k]
+                if cur_seq <= prev_seq:
+                    continue
+                if prev_fason and cur_fason:
+                    continue
+                Pred_i[cur_id].append(prev_id)
 
-            if last_op_of_prev_wo is not None and wo_op_ids:
-                Pred_i[wo_op_ids[0]].append(last_op_of_prev_wo)
+            if last_op_of_prev_wo is not None and wo_op_meta:
+                cur_first_id, _, cur_first_fason = wo_op_meta[0]
+                prev_last_id, _, prev_last_fason = last_op_of_prev_wo
+                if not (prev_last_fason and cur_first_fason):
+                    Pred_i[cur_first_id].append(prev_last_id)
 
-            if wo_op_ids:
-                last_op_of_prev_wo = wo_op_ids[-1]
+            if wo_op_meta:
+                last_op_of_prev_wo = wo_op_meta[-1]
 
         O_j[j] = job_op_ids
 
-        if group_start_times:
+        if use_planned_release_times and group_start_times:
             rj = _hours_from_plan(min(group_start_times))
         else:
             rj = 0.0
@@ -449,6 +515,15 @@ def build_data_from_operations(
             machine_type[str(m)] = 1 if t == "TIG" else 2
 
     out = dict(base_meta)
+    machine_label_map = {str(int(m)): str(int(m)) for m in M}
+    station_label_map = {str(int(l)): str(int(l)) for l in L}
+
+    for k, machine_id in enumerate(sorted(fason_machine_of_raw_op.values()), start=1):
+        machine_label_map[str(int(machine_id))] = f"Fason {k}"
+
+    for k, station_id in enumerate(sorted(fason_station_of_raw_op.values()), start=1):
+        station_label_map[str(int(station_id))] = f"Fason {k}"
+
     out.update({
         "J": J,
         "I": sorted([int(x) for x in I]),
@@ -475,6 +550,8 @@ def build_data_from_operations(
         "t_paint_j": t_paint_j,
 
         "fixed_ops": fixed_ops,  # anchored ops
+        "machine_label_map": machine_label_map,
+        "station_label_map": station_label_map,
         "default_processing_time_hours": default_pt_hours,
         "plan_calendar": plan_calendar if isinstance(plan_calendar, dict) else {"utc_offset": "+03:00"},
     })

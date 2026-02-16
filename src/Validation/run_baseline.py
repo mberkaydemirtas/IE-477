@@ -16,6 +16,7 @@ OUT_BASELINE_DIR = os.path.normpath(
 
 WINDOW_HOURS = 250.0
 OVERLAP_HOURS = 0.0
+DEFAULT_REFERENCE_NOW_ISO = "2026-01-30T00:00:00+00:00"
 
 
 def _load_json(path: str):
@@ -84,8 +85,11 @@ def main():
 
     system_config = _maybe_load_system_config(base_data_path, system_config_path)
 
-    # plan_start: now (you may also set global min plannedStart; but keeping runner consistent)
-    plan_start_iso = datetime.now(timezone.utc).isoformat()
+    # Historical dataset: anchor "now" to Jan 30, 2026 unless caller overrides.
+    plan_start_iso = (
+        base_data.get("reference_now_iso")
+        or DEFAULT_REFERENCE_NOW_ISO
+    )
 
     plan_calendar = (
         base_data.get("plan_calendar")

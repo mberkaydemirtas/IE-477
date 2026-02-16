@@ -81,7 +81,26 @@ def _make_windows(tmin, tmax, window, overlap=0.0):
             break
     return windows
 
-def _plot_gantt(schedule, key: str, title: str, out_png: str, t0=None, xlim=None, full_resources=None):
+def _resource_labels(resources, label_map):
+    if not isinstance(label_map, dict):
+        return [str(r) for r in resources]
+    labels = []
+    for r in resources:
+        k = str(r)
+        labels.append(str(label_map.get(k, r)))
+    return labels
+
+
+def _plot_gantt(
+    schedule,
+    key: str,
+    title: str,
+    out_png: str,
+    t0=None,
+    xlim=None,
+    full_resources=None,
+    resource_label_map=None,
+):
     rows = [r for r in schedule if (key in r and r.get("start") is not None and r.get("finish") is not None)]
     if not rows:
         print(f"WARNING: No rows to plot for {key}.")
@@ -136,7 +155,7 @@ def _plot_gantt(schedule, key: str, title: str, out_png: str, t0=None, xlim=None
         ax.text(start + dur * 0.02, y, label, va="center", fontsize=8, color="black")
 
     ax.set_yticks(range(len(resources)))
-    ax.set_yticklabels([str(r) for r in resources])
+    ax.set_yticklabels(_resource_labels(resources, resource_label_map))
     ax.set_xlabel("Time (hours)")
     ax.set_title(title)
     ax.grid(True, axis="x", linestyle="--", linewidth=0.5, alpha=0.6)
@@ -197,8 +216,11 @@ def main():
     tmin, tmax = _time_span(rows_machine)
     windows = _make_windows(tmin, tmax, window, overlap)
 
-    full_machines = list(range(1, 13))
-    full_stations = list(range(1, 10))
+    full_machines = res.get("M", None) or _unique_sorted([r.get("machine") for r in res_sched])
+    full_machines = [m for m in full_machines if _norm_res(m) not in (29, 46)]
+    full_stations = res.get("L", None) or _unique_sorted([r.get("station") for r in res_sched])
+    machine_label_map = res.get("machine_label_map", {}) or {}
+    station_label_map = res.get("station_label_map", {}) or {}
 
     for w_i, (ws, we) in enumerate(windows, start=1):
         suffix = f"_w{w_i:02d}_{ws:.1f}-{we:.1f}"
@@ -210,6 +232,7 @@ def main():
             t0=t0,
             xlim=(ws, we),
             full_resources=full_machines,
+            resource_label_map=machine_label_map,
         )
 
     for w_i, (ws, we) in enumerate(windows, start=1):
@@ -222,9 +245,8 @@ def main():
             t0=t0,
             xlim=(ws, we),
             full_resources=full_stations,
+            resource_label_map=station_label_map,
         )
 
 if __name__ == "__main__":
     main()
-
-
