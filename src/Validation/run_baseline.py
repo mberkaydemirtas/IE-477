@@ -34,6 +34,27 @@ def _save_json_atomic(path: str, obj: dict):
     os.replace(tmp, path)
 
 
+def _print_late_jobs(baseline: dict):
+    rows = baseline.get("job_delays", []) if isinstance(baseline, dict) else []
+    if not isinstance(rows, list):
+        rows = []
+
+    late = []
+    for r in rows:
+        try:
+            delay = float(r.get("delay_hours", 0.0))
+            if delay > 1e-9:
+                late.append((int(r.get("job_id")), delay))
+        except Exception:
+            continue
+
+    late.sort(key=lambda x: x[1], reverse=True)
+
+    print(f"late_jobs: {len(late)}")
+    for job_id, delay in late:
+        print(f"job_id={job_id}, delay_hours={delay:.3f}")
+
+
 def _maybe_load_system_config(base_data_path: str, system_config_path: str = None):
     if system_config_path:
         if os.path.exists(system_config_path):
@@ -128,6 +149,7 @@ def main():
     print(f"Baseline saved: {out_json}")
     print("plan_start_iso:", baseline.get("plan_start_iso"))
     print("objective:", baseline.get("objective"))
+    _print_late_jobs(baseline)
 
     gantt_dir = os.path.join(OUT_BASELINE_DIR, "base_data_gantts")
     os.makedirs(gantt_dir, exist_ok=True)

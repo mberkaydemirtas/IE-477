@@ -255,6 +255,27 @@ def _op_to_job(O_j: Dict[int, List[int]]) -> Dict[int, int]:
             mp[int(op)] = int(j)
     return mp
 
+
+def _build_job_delay_rows(
+    J: List[int],
+    d_j: Dict[int, float],
+    C_final: Dict[int, float],
+    T: Dict[int, float],
+) -> List[Dict[str, Any]]:
+    rows: List[Dict[str, Any]] = []
+    for j in sorted(int(x) for x in J):
+        due = float(d_j.get(j, 0.0))
+        comp = float(C_final.get(j, 0.0))
+        tard = float(T.get(j, max(comp - due, 0.0)))
+        rows.append({
+            "job_id": j,
+            "due": due,
+            "completion": comp,
+            "delay_hours": tard,
+            "is_late": bool(tard > 1e-9),
+        })
+    return rows
+
 def solve_baseline(
     data: Dict[str, Any],
     plan_start_iso: str,
@@ -302,6 +323,13 @@ def solve_baseline(
         if l is not None:
             y_old[f"{i},{int(l)}"] = 1
 
+    job_delays = _build_job_delay_rows(
+        J=data["J"],
+        d_j=data["d_j"],
+        C_final=res.C_final,
+        T=res.T,
+    )
+
     return {
         "plan_start_iso": plan_start_iso,
         "plan_calendar": plan_calendar,
@@ -311,6 +339,7 @@ def solve_baseline(
         "x_old": x_old,
         "y_old": y_old,
         "schedule": schedule,
+        "job_delays": job_delays,
         "note": "Baseline solved by HeuristicBaseModel.run_heuristic",
 
         # ✅ NEW: include resource universes so gantt can show correct machines/stations
@@ -793,6 +822,13 @@ def solve_reschedule(
         Tu = float(res.T.get(ujid, 0.0))
         urgent_info = {"job_id": ujid, "C_final": Cf_u, "T": Tu, "d": float(data2["d_j"][ujid])}
 
+    job_delays = _build_job_delay_rows(
+        J=data2["J"],
+        d_j=data2["d_j"],
+        C_final=res.C_final,
+        T=res.T,
+    )
+
     return {
         "t0": float(t0),
         "t_now_iso": t_now_iso,
@@ -803,6 +839,7 @@ def solve_reschedule(
         "keep_decisions": {int(k): int(v) for k, v in keep_decisions.items()},
         "rem_map": {int(k): int(v) for k, v in rem_map.items()},
         "schedule": schedule,
+        "job_delays": job_delays,
         "note": "Reschedule solved by same engine: HeuristicBaseModel.run_heuristic",
         "M": list(data2.get("M", [])),
         "L": list(data2.get("L", [])),

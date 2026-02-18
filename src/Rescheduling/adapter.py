@@ -13,7 +13,7 @@ Key idea:
 from __future__ import annotations
 
 from typing import Any, Dict, List, Tuple, Optional
-from datetime import datetime
+from datetime import datetime, timezone
 import re
 
 
@@ -80,6 +80,19 @@ def _extract_seq(op: dict) -> int:
     return int(_safe_int(op.get("id"), 0) or 0)
 
 
+def _parse_iso(s: Any) -> Optional[datetime]:
+    if not s or not isinstance(s, str):
+        return None
+    s2 = s.strip().replace("Z", "+00:00")
+    try:
+        dt = datetime.fromisoformat(s2)
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        return dt
+    except Exception:
+        return None
+
+
 def build_data_from_operations(
     operations: List[dict],
     base_data: Dict[str, Any],
@@ -89,6 +102,10 @@ def build_data_from_operations(
 ) -> Dict[str, Any]:
     plan_calendar = plan_calendar or {"utc_offset": "+03:00"}
     location_map = location_map or {}
+    plan_start_dt = _parse_iso(plan_start_iso) or datetime.now(timezone.utc)
+
+    def _hours_from_plan(dt: datetime) -> float:
+        return (dt - plan_start_dt).total_seconds() / 3600.0
 
     # Defaults from base_data if candidates are missing
     default_M = [int(x) for x in (base_data.get("M") or [])]
@@ -163,6 +180,8 @@ def build_data_from_operations(
     # we keep it in data but heuristic ignores it unless you use it in adapter rules.
     op_location: Dict[int, Any] = {}
 
+    job_due_times: Dict[int, List[datetime]] = {}
+
     for jk, ops in groups.items():
         j = job_index_of[jk]
 
@@ -209,11 +228,18 @@ def build_data_from_operations(
                 loc = wc
             op_location[i] = loc
 
+            due_dt = _parse_iso(o.get("endDate"))
+            if due_dt:
+                job_due_times.setdefault(j, []).append(due_dt)
+
     # r_j, d_j:
     # If plannedStartDateTime/plannedEndDateTime are present consistently in input, you can compute relative hours.
     # If not, keep 0 and VERY LARGE; your pipeline can override later.
     r_j: Dict[int, float] = {j: 0.0 for j in J}
     d_j: Dict[int, float] = {j: 1e9 for j in J}
+    for j, due_list in job_due_times.items():
+        if due_list:
+            d_j[j] = _hours_from_plan(min(due_list))
 
     # post ops fields, default zeros unless base_data provides
     g_j = {j: int((base_data.get("g_j") or {}).get(str(j), (base_data.get("g_j") or {}).get(j, 0))) for j in J}
