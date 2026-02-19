@@ -20,7 +20,7 @@ OUT_BASELINE_DIR = os.path.normpath(
 )
 
 # ---- Gantt split settings (hours) ----
-WINDOW_HOURS = 200.0
+WINDOW_HOURS = 50.0
 OVERLAP_HOURS = 0.0
 
 

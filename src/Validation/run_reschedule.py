@@ -7,7 +7,7 @@ import re
 import sys
 import subprocess
 from typing import Optional, Tuple
-from datetime import datetime, timezone
+from datetime import datetime, time, timedelta, timezone
 
 from solver_core import solve_reschedule
 from adapter import build_data_from_operations
@@ -21,7 +21,7 @@ OUT_RESCHEDULE_DIR = os.path.normpath(os.path.join(os.path.dirname(__file__), "o
 
 REFERENCE_BASELINE_SOLUTION = os.path.join(OUT_BASELINE_DIR, "base_data_baseline_solution.json")
 
-WINDOW_HOURS = 250.0
+WINDOW_HOURS = 50.0
 OVERLAP_HOURS = 0.0
 DEFAULT_REFERENCE_NOW_ISO = "2026-01-30T00:00:00+00:00"
 
@@ -162,6 +162,153 @@ def _run_plotter(script_name: str, json_path: str, outdir: str, sid_override: st
         check=False
     )
 
+def _parse_iso_dt(s: str):
+    if not s or not isinstance(s, str):
+        return None
+    s2 = s.strip().replace("Z", "+00:00")
+    try:
+        dt = datetime.fromisoformat(s2)
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        return dt
+    except Exception:
+        return None
+
+def _parse_utc_offset(offset_text: str) -> timezone:
+    s = str(offset_text or "+00:00").strip()
+    if len(s) == 6 and s[0] in "+-" and s[3] == ":":
+        try:
+            sign = 1 if s[0] == "+" else -1
+            hh = int(s[1:3])
+            mm = int(s[4:6])
+            return timezone(sign * timedelta(hours=hh, minutes=mm))
+        except Exception:
+            pass
+    return timezone.utc
+
+def _first_work_instant(plan_local, workdays, shift_start, workday_hours):
+    cur_day = plan_local.date()
+    while True:
+        if cur_day.weekday() in workdays:
+            day_start = datetime.combine(cur_day, shift_start, tzinfo=plan_local.tzinfo)
+            day_end = day_start + timedelta(hours=workday_hours)
+            if plan_local <= day_start:
+                return day_start
+            if day_start < plan_local < day_end:
+                return plan_local
+        cur_day = cur_day + timedelta(days=1)
+
+def _next_workday(d, workdays):
+    cur = d
+    for _ in range(8):
+        cur = cur + timedelta(days=1)
+        if cur.weekday() in workdays:
+            return cur
+    return cur
+
+def _business_hours_to_local_dt(hours: float, cal: dict):
+    rem = max(0.0, float(hours))
+    workdays = cal["workdays"]
+    shift_start = cal["shift_start"]
+    workday_hours = cal["workday_hours"]
+    cur = _first_work_instant(cal["plan_local"], workdays, shift_start, workday_hours)
+
+    while rem > 1e-9:
+        day_start = datetime.combine(cur.date(), shift_start, tzinfo=cur.tzinfo)
+        day_end = day_start + timedelta(hours=workday_hours)
+        if cur < day_start:
+            cur = day_start
+        if cur >= day_end:
+            nd = _next_workday(cur.date(), workdays)
+            cur = datetime.combine(nd, shift_start, tzinfo=cur.tzinfo)
+            continue
+        avail = (day_end - cur).total_seconds() / 3600.0
+        step = min(rem, avail)
+        cur = cur + timedelta(hours=step)
+        rem -= step
+        if rem > 1e-9 and cur >= day_end:
+            nd = _next_workday(cur.date(), workdays)
+            cur = datetime.combine(nd, shift_start, tzinfo=cur.tzinfo)
+    return cur
+
+def _build_calendar(plan_start_iso: str, plan_calendar: dict):
+    ps = _parse_iso_dt(plan_start_iso)
+    if ps is None:
+        return None
+    cal = plan_calendar if isinstance(plan_calendar, dict) else {}
+    tz = _parse_utc_offset(cal.get("utc_offset", "+00:00"))
+    workdays_raw = cal.get("workdays", [0, 1, 2, 3, 4])
+    workdays = set()
+    for w in workdays_raw if isinstance(workdays_raw, list) else [0, 1, 2, 3, 4]:
+        try:
+            wi = int(w)
+            if 0 <= wi <= 6:
+                workdays.add(wi)
+        except Exception:
+            continue
+    if not workdays:
+        workdays = {0, 1, 2, 3, 4}
+    shift_text = str(cal.get("shift_start_local", "09:00"))
+    try:
+        hh, mm = shift_text.split(":")[:2]
+        shift_start = time(hour=int(hh), minute=int(mm))
+    except Exception:
+        shift_start = time(hour=9, minute=0)
+    try:
+        workday_hours = float(cal.get("workday_hours", 8.0))
+    except Exception:
+        workday_hours = 8.0
+    if workday_hours <= 0:
+        workday_hours = 8.0
+    return {
+        "plan_local": ps.astimezone(tz),
+        "workdays": workdays,
+        "shift_start": shift_start,
+        "workday_hours": workday_hours,
+    }
+
+def _print_job_delay_report(result: dict, plan_start_iso: str = None, plan_calendar: dict = None):
+    rows = result.get("job_delays", []) if isinstance(result, dict) else []
+    if not isinstance(rows, list):
+        rows = []
+    cal = _build_calendar(plan_start_iso, plan_calendar)
+
+    all_rows = []
+    pos = 0
+    zero = 0
+    neg = 0
+    for r in rows:
+        try:
+            job_id = int(r.get("job_id"))
+            due = float(r.get("due", 0.0))
+            comp = float(r.get("completion", 0.0))
+            delay = float(r.get("delay_hours", 0.0))
+            signed = comp - due
+            completion_total = None
+            if cal is not None:
+                completion_dt = _business_hours_to_local_dt(comp, cal)
+                completion_total = (completion_dt - cal["plan_local"]).total_seconds() / 3600.0
+            completion_print = completion_total if completion_total is not None else comp
+            all_rows.append((job_id, delay, signed, due, completion_print))
+            if signed > 1e-9:
+                pos += 1
+            elif signed < -1e-9:
+                neg += 1
+            else:
+                zero += 1
+        except Exception:
+            continue
+
+    all_rows.sort(key=lambda x: x[0])
+    print(f"jobs_total: {len(all_rows)}")
+    print(f"signed_delay_counts: pos={pos}, zero={zero}, neg={neg}")
+    print("all_job_delays:")
+    for job_id, delay, signed, due, completion in all_rows:
+        print(
+            f"job_id={job_id}, tardiness={delay:.3f}, "
+            f"signed_delay_hours={signed:.3f}, due={due:.3f}, completion={completion:.3f}"
+        )
+
 def main():
     if len(sys.argv) < 2:
         print("Usage: py run_reschedule.py data/<scenario>.json")
@@ -272,6 +419,11 @@ def main():
     print(f"Reschedule saved: {out_path}")
     print("t0:", res.get("t0"))
     print("objective:", res.get("objective"))
+    _print_job_delay_report(
+        res,
+        plan_start_iso=baseline_plan_start_iso,
+        plan_calendar=plan_calendar,
+    )
 
     compare_dir = os.path.join(OUT_RESCHEDULE_DIR, f"scenario{sid_txt}_compare_gantts")
     os.makedirs(compare_dir, exist_ok=True)

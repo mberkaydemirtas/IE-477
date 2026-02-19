@@ -24,7 +24,7 @@ REFERENCE_BASELINE_SOLUTION = os.path.join(OUT_BASELINE_DIR, "base_data_baseline
 
 # ---- Gantt split settings (hours) ----
 # window <= 0 => single gantt (old behavior)
-WINDOW_HOURS = 200.0
+WINDOW_HOURS = 50.0
 OVERLAP_HOURS = 0.0
 
 

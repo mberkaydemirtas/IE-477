@@ -99,8 +99,8 @@ def build_data_from_operations(
     - Within the same customer group: different work orders scheduled by workOrderNumber ascending.
       We enforce it by linking last op of WO(k) -> first op of WO(k+1).
     - p_im (hours):
-        setup + (cycleTime * plannedPartCount)   if cycleTime is not null and >0
-        else setup + (plannedEndDateTime - plannedStartDateTime)
+        setup + (plannedEndDateTime - plannedStartDateTime)   if both planned timestamps exist
+        else setup + (cycleTime * plannedPartCount)           if cycleTime is not null and >0
       NOTE: cycleTime assumed MINUTES / part.
     - plannedEndDateTime is NOT used for due dates.
     - d_j comes from endDate (group deadline). If multiple, use MIN endDate.
@@ -298,29 +298,22 @@ def build_data_from_operations(
         setup_h = _duration_hhmmss_to_hours(op.get("plannedSetupDuration"))
         qty = _to_int_safe(op.get("plannedPartCount"), default=0)
 
+        st = _parse_iso(op.get("plannedStartDateTime"))
+        en = _parse_iso(op.get("plannedEndDateTime"))
+        if st and en:
+            win_s = (en - st).total_seconds()
+            win_h = max(0.0, win_s / 3600.0)
+            return max(setup_h + win_h, min_pt_hours)
+
         ct = op.get("cycleTime", None)
         ct_val = 0.0
-        has_ct = False
         if ct is not None:
             sct = str(ct).strip()
             if sct != "":
-                has_ct = True
                 ct_val = _to_float_safe(ct, default=0.0)
             if ct_val > 0.0 and qty > 0:
                 # cycleTime assumed minutes/part
                 return max(setup_h + (ct_val * qty) / 60.0, min_pt_hours)
-
-        st = _parse_iso(op.get("plannedStartDateTime"))
-        en = _parse_iso(op.get("plannedEndDateTime"))
-        if st and en:
-            # If cycle time is zero/empty and planned window is zero-ish, force 2 days.
-            win_s = (en - st).total_seconds()
-            if (not has_ct or ct_val <= 0.0) and abs(win_s) <= 1.0:
-                return 48.0
-            win_h = win_s / 3600.0
-            if win_h < 0:
-                win_h = 0.0
-            return max(setup_h + win_h, min_pt_hours)
 
         return max(setup_h + default_pt_hours, min_pt_hours)
 

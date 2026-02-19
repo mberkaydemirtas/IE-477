@@ -2,7 +2,7 @@
   "calendar": {
     "utc_offset": "+03:00",
     "workdays": [0, 1, 2, 3, 4],
-    "shift_start_local": "08:00",
+    "shift_start_local": "09:00",
     "workday_hours": 8.0
   },
 

@@ -5,6 +5,7 @@ import json
 import os
 import re
 import sys
+from datetime import datetime, time, timedelta, timezone
 
 import matplotlib.pyplot as plt
 from matplotlib.patches import Patch
@@ -66,27 +67,149 @@ def _extract_sid(meta: dict) -> str:
     return "xx"
 
 
-def _time_span(rows):
-    if not rows:
-        return 0.0, 0.0
-    tmin = min(float(r["start"]) for r in rows if r.get("start") is not None)
-    tmax = max(float(r["finish"]) for r in rows if r.get("finish") is not None)
-    return tmin, tmax
+def _parse_iso(s):
+    if not s or not isinstance(s, str):
+        return None
+    s2 = s.strip().replace("Z", "+00:00")
+    try:
+        dt = datetime.fromisoformat(s2)
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        return dt
+    except Exception:
+        return None
 
 
-def _make_windows(tmin, tmax, window, overlap=0.0):
-    if window is None or window <= 0 or (tmax - tmin) <= window:
-        return [(tmin, tmax)]
-    step = max(1e-9, window - max(0.0, overlap))
-    windows = []
-    s = tmin
-    while s < tmax:
-        e = s + window
-        windows.append((s, min(e, tmax)))
-        s += step
-        if len(windows) > 5000:
-            break
-    return windows
+def _parse_utc_offset(offset_text: str) -> timezone:
+    s = str(offset_text or "+00:00").strip()
+    m = re.fullmatch(r"([+-])(\d{2}):(\d{2})", s)
+    if not m:
+        return timezone.utc
+    sign = 1 if m.group(1) == "+" else -1
+    hh = int(m.group(2))
+    mm = int(m.group(3))
+    return timezone(sign * timedelta(hours=hh, minutes=mm))
+
+
+def _calendar_from_meta(meta: dict):
+    cal = meta.get("plan_calendar", {}) if isinstance(meta, dict) else {}
+    if not isinstance(cal, dict):
+        cal = {}
+
+    workdays_raw = cal.get("workdays", [0, 1, 2, 3, 4])
+    workdays = set()
+    for wd in workdays_raw if isinstance(workdays_raw, list) else [0, 1, 2, 3, 4]:
+        try:
+            i = int(wd)
+            if 0 <= i <= 6:
+                workdays.add(i)
+        except Exception:
+            continue
+    if not workdays:
+        workdays = {0, 1, 2, 3, 4}
+
+    shift_text = str(cal.get("shift_start_local", "09:00"))
+    try:
+        hh, mm = shift_text.split(":")[:2]
+        shift_start = time(hour=int(hh), minute=int(mm))
+    except Exception:
+        shift_start = time(hour=9, minute=0)
+
+    try:
+        workday_hours = float(cal.get("workday_hours", 8.0))
+    except Exception:
+        workday_hours = 8.0
+    if workday_hours <= 0:
+        workday_hours = 8.0
+
+    tz = _parse_utc_offset(cal.get("utc_offset", "+00:00"))
+    plan_start = _parse_iso(meta.get("plan_start_iso")) or datetime.now(timezone.utc)
+    plan_local = plan_start.astimezone(tz)
+
+    return {
+        "tz": tz,
+        "plan_local": plan_local,
+        "workdays": workdays,
+        "shift_start": shift_start,
+        "workday_hours": workday_hours,
+    }
+
+
+def _next_workday(d, workdays):
+    cur = d
+    for _ in range(8):
+        cur = cur + timedelta(days=1)
+        if cur.weekday() in workdays:
+            return cur
+    return cur
+
+
+def _first_work_instant(plan_local, workdays, shift_start, workday_hours):
+    cur_day = plan_local.date()
+    while True:
+        if cur_day.weekday() in workdays:
+            day_start = datetime.combine(cur_day, shift_start, tzinfo=plan_local.tzinfo)
+            day_end = day_start + timedelta(hours=workday_hours)
+            if plan_local <= day_start:
+                return day_start
+            if day_start < plan_local < day_end:
+                return plan_local
+        cur_day = cur_day + timedelta(days=1)
+
+
+def _business_hours_to_local_dt(hours, cal):
+    try:
+        rem = float(hours)
+    except Exception:
+        rem = 0.0
+    rem = max(0.0, rem)
+
+    workdays = cal["workdays"]
+    shift_start = cal["shift_start"]
+    workday_hours = cal["workday_hours"]
+
+    cur = _first_work_instant(cal["plan_local"], workdays, shift_start, workday_hours)
+
+    while rem > 1e-9:
+        day_start = datetime.combine(cur.date(), shift_start, tzinfo=cur.tzinfo)
+        day_end = day_start + timedelta(hours=workday_hours)
+
+        if cur < day_start:
+            cur = day_start
+        if cur >= day_end:
+            nd = _next_workday(cur.date(), workdays)
+            cur = datetime.combine(nd, shift_start, tzinfo=cur.tzinfo)
+            continue
+
+        avail = (day_end - cur).total_seconds() / 3600.0
+        step = min(rem, avail)
+        cur = cur + timedelta(hours=step)
+        rem -= step
+
+        if rem > 1e-9 and cur >= day_end:
+            nd = _next_workday(cur.date(), workdays)
+            cur = datetime.combine(nd, shift_start, tzinfo=cur.tzinfo)
+
+    return cur
+
+
+def _convert_schedule_to_local(schedule, cal):
+    out = []
+    for r in schedule:
+        if r.get("start") is None or r.get("finish") is None:
+            continue
+        try:
+            st_h = float(r["start"])
+            en_h = float(r["finish"])
+        except Exception:
+            continue
+        st_dt = _business_hours_to_local_dt(st_h, cal)
+        en_dt = _business_hours_to_local_dt(en_h, cal)
+        rr = dict(r)
+        rr["_start_local"] = st_dt
+        rr["_finish_local"] = en_dt
+        out.append(rr)
+    return out
 
 
 def _resource_labels(resources, label_map):
@@ -99,82 +222,76 @@ def _resource_labels(resources, label_map):
     return labels
 
 
-def _plot_gantt(
+def _plot_day_gantt(
     schedule,
     key: str,
     title: str,
     out_png: str,
-    xlim=None,
+    day_start,
+    day_end,
+    shift_start,
+    workday_hours,
     full_resources=None,
     resource_label_map=None,
+    is_weekend=False,
 ):
-    rows = [
-        r
-        for r in schedule
-        if (key in r and r.get("start") is not None and r.get("finish") is not None)
-    ]
-    if not rows:
-        print(f"WARNING: No rows to plot for {key}.")
-        return
-
     if full_resources is not None:
         resources = [_norm_res(x) for x in list(full_resources)]
     else:
-        resources = _unique_sorted([_norm_res(r.get(key)) for r in rows])
+        resources = _unique_sorted([_norm_res(r.get(key)) for r in schedule if key in r])
 
     if not resources:
         print(f"WARNING: No resources found for {key}.")
         return
 
     idx = {res: i for i, res in enumerate(resources)}
-    job_color = _make_job_color_map(rows)
+    job_color = _make_job_color_map(schedule)
 
-    rows.sort(key=lambda r: (idx.get(_norm_res(r.get(key)), 10**9), float(r["start"])))
+    rows = [r for r in schedule if (key in r and r.get("_start_local") is not None and r.get("_finish_local") is not None)]
+    rows.sort(key=lambda r: (idx.get(_norm_res(r.get(key)), 10**9), r["_start_local"]))
 
     fig_h = max(6.0, min(18.0, 2.5 + 0.45 * len(resources)))
     fig, ax = plt.subplots(figsize=(16, fig_h))
 
-    ws = we = None
-    if xlim is not None:
-        try:
-            ws, we = float(xlim[0]), float(xlim[1])
-        except Exception:
-            ws = we = None
-
     for r in rows:
+        if is_weekend:
+            continue
         res = _norm_res(r.get(key))
         y = idx.get(res, None)
         if y is None:
             continue
 
-        start = float(r["start"])
-        finish = float(r["finish"])
-
-        if ws is not None and we is not None:
-            if finish <= ws or start >= we:
-                continue
-
-        dur = max(0.0, finish - start)
-        if dur <= 0:
+        seg_start = max(r["_start_local"], day_start)
+        seg_end = min(r["_finish_local"], day_end)
+        if seg_end <= seg_start:
             continue
+
+        left = (seg_start - day_start).total_seconds() / 3600.0
+        dur = (seg_end - seg_start).total_seconds() / 3600.0
 
         jid = int(r.get("job_id", -1))
         color = job_color.get(jid, (0.75, 0.75, 0.75, 1.0))
 
-        ax.barh(y, dur, left=start, height=0.6, color=color, edgecolor="black", linewidth=0.6)
+        ax.barh(y, dur, left=left, height=0.6, color=color, edgecolor="black", linewidth=0.6)
 
-        label = str(r.get("op_label", r.get("op_id", "")))
-        ax.text(start + dur * 0.02, y, label, va="center", fontsize=8, color="black")
+        if dur >= 0.2:
+            label = str(r.get("op_label", r.get("op_id", "")))
+            ax.text(left + max(0.03, dur * 0.02), y, label, va="center", fontsize=8, color="black")
 
+    tick_count = int(round(workday_hours))
+    tick_count = max(1, tick_count)
+    ax.set_xlim(0.0, workday_hours)
+    ax.set_xticks([float(h) for h in range(0, tick_count + 1)])
+    ax.set_xticklabels([f"{(shift_start.hour + h) % 24:02d}:00" for h in range(0, tick_count + 1)])
+    ax.set_xlabel("Saat")
     ax.set_yticks(range(len(resources)))
     ax.set_yticklabels(_resource_labels(resources, resource_label_map))
-    ax.set_xlabel("Time (hours)")
     ax.set_title(title)
     ax.grid(True, axis="x", linestyle="--", linewidth=0.5, alpha=0.6)
     ax.grid(True, axis="y", linestyle=":", linewidth=0.3, alpha=0.4)
 
-    if ws is not None and we is not None:
-        ax.set_xlim(ws, we)
+    if is_weekend:
+        ax.text(workday_hours / 2.0, max(0, len(resources) - 1), "Hafta Sonu", ha="center", va="center", fontsize=10, alpha=0.7)
 
     legend_jobs = sorted([j for j in job_color.keys() if j >= 0])
     handles = [Patch(facecolor=job_color[j], edgecolor="black", label=f"Job {j}") for j in legend_jobs]
@@ -188,14 +305,13 @@ def _plot_gantt(
 
 
 def main():
-    # usage:
-    # py plot_gantt_baseline.py <baseline_json_path> <outdir> [sid_override] [window_hours] [overlap_hours]
     baseline_path = sys.argv[1] if len(sys.argv) > 1 else "baseline_solution.json"
     outdir = sys.argv[2] if len(sys.argv) > 2 else os.path.dirname(os.path.abspath(baseline_path))
     sid_override = sys.argv[3] if len(sys.argv) > 3 else None
 
-    window = float(sys.argv[4]) if len(sys.argv) > 4 else 0.0
-    overlap = float(sys.argv[5]) if len(sys.argv) > 5 else 0.0
+    if not os.path.exists(baseline_path):
+        print(f"ERROR: baseline file not found: {baseline_path}")
+        sys.exit(1)
 
     base = _load(baseline_path)
     base_sched = base.get("schedule", [])
@@ -205,49 +321,65 @@ def main():
     os.makedirs(outdir, exist_ok=True)
 
     for fn in os.listdir(outdir):
-        if fn.startswith(f"scenario{sid}_baseline_machine_w") and fn.endswith(".png"):
+        if fn.startswith(f"scenario{sid}_baseline_machine_") and fn.endswith(".png"):
             os.remove(os.path.join(outdir, fn))
-        if fn.startswith(f"scenario{sid}_baseline_station_w") and fn.endswith(".png"):
+        if fn.startswith(f"scenario{sid}_baseline_station_") and fn.endswith(".png"):
             os.remove(os.path.join(outdir, fn))
 
-    rows_machine = [
-        r
-        for r in base_sched
-        if ("machine" in r and r.get("start") is not None and r.get("finish") is not None)
-    ]
-    tmin, tmax = _time_span(rows_machine)
-    windows = _make_windows(tmin, tmax, window, overlap)
+    cal = _calendar_from_meta(base)
+    schedule_local = _convert_schedule_to_local(base_sched, cal)
+    if not schedule_local:
+        print("WARNING: No schedule rows to plot.")
+        return
 
-    # dynamic resources from baseline json
+    min_dt = min(r["_start_local"] for r in schedule_local)
+    max_dt = max(r["_finish_local"] for r in schedule_local)
+
+    day_cursor = min_dt.date()
+    day_last = max_dt.date()
+
     full_machines = base.get("M", None) or _unique_sorted([r.get("machine") for r in base_sched])
     full_machines = [m for m in full_machines if _norm_res(m) not in (29, 46)]
     full_stations = base.get("L", None) or _unique_sorted([r.get("station") for r in base_sched])
     machine_label_map = base.get("machine_label_map", {}) or {}
     station_label_map = base.get("station_label_map", {}) or {}
 
-    for w_i, (ws, we) in enumerate(windows, start=1):
-        suffix = f"_w{w_i:02d}_{ws:.1f}-{we:.1f}"
-        _plot_gantt(
-            base_sched,
+    while day_cursor <= day_last:
+        day_start = datetime.combine(day_cursor, cal["shift_start"], tzinfo=cal["tz"])
+        day_end = day_start + timedelta(hours=cal["workday_hours"])
+        weekday_name = day_start.strftime("%A")
+        date_text = day_start.strftime("%Y-%m-%d")
+        is_weekend = day_cursor.weekday() not in cal["workdays"]
+
+        _plot_day_gantt(
+            schedule_local,
             "machine",
-            f"Scenario {sid} - Baseline (Machine Gantt) [{ws:.1f}, {we:.1f}]",
-            os.path.join(outdir, f"scenario{sid}_baseline_machine{suffix}.png"),
-            xlim=(ws, we),
+            f"Scenario {sid} - Baseline (Machine) - {date_text} {weekday_name}",
+            os.path.join(outdir, f"scenario{sid}_baseline_machine_d{date_text}.png"),
+            day_start,
+            day_end,
+            shift_start=cal["shift_start"],
+            workday_hours=cal["workday_hours"],
             full_resources=full_machines,
             resource_label_map=machine_label_map,
+            is_weekend=is_weekend,
         )
 
-    for w_i, (ws, we) in enumerate(windows, start=1):
-        suffix = f"_w{w_i:02d}_{ws:.1f}-{we:.1f}"
-        _plot_gantt(
-            base_sched,
+        _plot_day_gantt(
+            schedule_local,
             "station",
-            f"Scenario {sid} - Baseline (Station Gantt) [{ws:.1f}, {we:.1f}]",
-            os.path.join(outdir, f"scenario{sid}_baseline_station{suffix}.png"),
-            xlim=(ws, we),
+            f"Scenario {sid} - Baseline (Station) - {date_text} {weekday_name}",
+            os.path.join(outdir, f"scenario{sid}_baseline_station_d{date_text}.png"),
+            day_start,
+            day_end,
+            shift_start=cal["shift_start"],
+            workday_hours=cal["workday_hours"],
             full_resources=full_stations,
             resource_label_map=station_label_map,
+            is_weekend=is_weekend,
         )
+
+        day_cursor = day_cursor + timedelta(days=1)
 
 
 if __name__ == "__main__":
