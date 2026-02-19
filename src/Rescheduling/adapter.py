@@ -93,6 +93,32 @@ def _parse_iso(s: Any) -> Optional[datetime]:
         return None
 
 
+def _resource_bucket(op: dict) -> Optional[int]:
+    text = " ".join([
+        str(op.get("workCenterName") or ""),
+        str(op.get("workCenterMachineCode") or ""),
+        str(op.get("name") or ""),
+    ]).upper()
+
+    if "REWORK" in text:
+        return 2
+    if ("KALİTE" in text) or ("KALITE" in text) or ("QUALITY" in text):
+        return 7
+    if ("BOYA" in text) or ("PAINT" in text):
+        return 1
+
+    mid = _safe_int(op.get("workCenterMachineId"), 0) or 0
+    sid = _safe_int(op.get("workCenterId"), 0) or 0
+    if (mid in (46, 2)) or (sid in (48, 2)):
+        return 2
+    if (mid == 7) or (sid == 7):
+        return 7
+    if (mid == 1) or (sid == 1):
+        return 1
+
+    return None
+
+
 def build_data_from_operations(
     operations: List[dict],
     base_data: Dict[str, Any],
@@ -107,14 +133,9 @@ def build_data_from_operations(
     def _hours_from_plan(dt: datetime) -> float:
         return (dt - plan_start_dt).total_seconds() / 3600.0
 
-    # Defaults from base_data if candidates are missing
-    default_M = [int(x) for x in (base_data.get("M") or [])]
-    default_L = [int(x) for x in (base_data.get("L") or [])]
-
-    if not default_M:
-        default_M = [1, 2, 3, 4]
-    if not default_L:
-        default_L = [1, 2, 3, 4]
+    # Fixed resource universe: 1=BOYA, 2=REWORK, 7=KALITE KONTROL
+    default_M = [1, 2, 7]
+    default_L = [1, 2, 7]
 
     L_big = [int(x) for x in (base_data.get("L_big") or [])]
     L_small = [int(x) for x in (base_data.get("L_small") or [])]
@@ -125,6 +146,8 @@ def build_data_from_operations(
         if not isinstance(op, dict):
             continue
         if op.get("isPlannable", True) is False:
+            continue
+        if _resource_bucket(op) not in (1, 2, 7):
             continue
         op_id = _safe_int(op.get("id"), None)
         if op_id is None:
@@ -201,18 +224,12 @@ def build_data_from_operations(
             # processing time: cycleTime minutes -> hours
             p_i[i] = float(_cycle_minutes_to_hours(o.get("cycleTime", None)))
 
-            # candidates
-            mc = o.get("machineCandidates", None)
-            sc = o.get("stationCandidates", None)
-
-            if isinstance(mc, list) and mc:
-                M_i[i] = [int(x) for x in mc]
+            mapped = _resource_bucket(o)
+            if mapped in (1, 2, 7):
+                M_i[i] = [int(mapped)]
+                L_i[i] = [int(mapped)]
             else:
                 M_i[i] = list(default_M)
-
-            if isinstance(sc, list) and sc:
-                L_i[i] = [int(x) for x in sc]
-            else:
                 L_i[i] = list(default_L)
 
             # station size requirement
@@ -278,7 +295,9 @@ def build_data_from_operations(
         "t_paint_j": t_paint_j,
         "beta_i": beta_i,
         "op_location": op_location,  # optional metadata
-        "job_key_map": job_index_of  # optional debug
+        "job_key_map": job_index_of,  # optional debug
+        "machine_label_map": {"1": "BOYA", "2": "REWORK", "7": "KALITE KONTROL"},
+        "station_label_map": {"1": "BOYA", "2": "REWORK", "7": "KALITE KONTROL"},
     })
 
     return out

@@ -276,6 +276,90 @@ def _build_job_delay_rows(
         })
     return rows
 
+
+def _build_resource_utilization(
+    schedule: List[Dict[str, Any]],
+    resource_key: str,
+    resource_ids: List[int],
+    label_map: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    ids = [int(x) for x in (resource_ids or [])]
+    labels = label_map if isinstance(label_map, dict) else {}
+
+    min_start = None
+    max_finish = None
+
+    busy: Dict[int, float] = {rid: 0.0 for rid in ids}
+    first_start: Dict[int, Optional[float]] = {rid: None for rid in ids}
+    last_finish: Dict[int, Optional[float]] = {rid: None for rid in ids}
+
+    for r in schedule or []:
+        try:
+            st = float(r.get("start"))
+            fn = float(r.get("finish"))
+        except Exception:
+            continue
+        if fn < st:
+            continue
+
+        if min_start is None or st < min_start:
+            min_start = st
+        if max_finish is None or fn > max_finish:
+            max_finish = fn
+
+        rv = r.get(resource_key, None)
+        if rv is None:
+            continue
+        try:
+            rid = int(rv)
+        except Exception:
+            continue
+        if rid not in busy:
+            continue
+
+        dur = max(0.0, fn - st)
+        busy[rid] += dur
+
+        if first_start[rid] is None or st < float(first_start[rid]):
+            first_start[rid] = st
+        if last_finish[rid] is None or fn > float(last_finish[rid]):
+            last_finish[rid] = fn
+
+    horizon_start = float(min_start) if min_start is not None else 0.0
+    horizon_finish = float(max_finish) if max_finish is not None else 0.0
+    horizon_hours = max(0.0, horizon_finish - horizon_start)
+
+    rows: List[Dict[str, Any]] = []
+    for rid in sorted(ids):
+        bs = float(busy.get(rid, 0.0))
+        rs = first_start.get(rid)
+        rf = last_finish.get(rid)
+        active_window = 0.0
+        if rs is not None and rf is not None and float(rf) >= float(rs):
+            active_window = float(rf) - float(rs)
+
+        util_h = (bs / horizon_hours * 100.0) if horizon_hours > 1e-9 else 0.0
+        util_a = (bs / active_window * 100.0) if active_window > 1e-9 else 0.0
+
+        rows.append({
+            "resource_id": int(rid),
+            "label": str(labels.get(str(rid), rid)),
+            "busy_hours": bs,
+            "horizon_hours": horizon_hours,
+            "utilization_pct": util_h,
+            "active_window_hours": active_window,
+            "active_utilization_pct": util_a,
+            "first_start": float(rs) if rs is not None else None,
+            "last_finish": float(rf) if rf is not None else None,
+        })
+
+    return {
+        "horizon_start": horizon_start,
+        "horizon_finish": horizon_finish,
+        "horizon_hours": horizon_hours,
+        "rows": rows,
+    }
+
 def solve_baseline(
     data: Dict[str, Any],
     plan_start_iso: str,
@@ -329,6 +413,18 @@ def solve_baseline(
         C_final=res.C_final,
         T=res.T,
     )
+    machine_utilization = _build_resource_utilization(
+        schedule=schedule,
+        resource_key="machine",
+        resource_ids=list(data.get("M", [])),
+        label_map=dict(data.get("machine_label_map", {}) or {}),
+    )
+    station_utilization = _build_resource_utilization(
+        schedule=schedule,
+        resource_key="station",
+        resource_ids=list(data.get("L", [])),
+        label_map=dict(data.get("station_label_map", {}) or {}),
+    )
 
     return {
         "plan_start_iso": plan_start_iso,
@@ -340,6 +436,8 @@ def solve_baseline(
         "y_old": y_old,
         "schedule": schedule,
         "job_delays": job_delays,
+        "machine_utilization": machine_utilization,
+        "station_utilization": station_utilization,
         "note": "Baseline solved by HeuristicBaseModel.run_heuristic",
 
         # ✅ NEW: include resource universes so gantt can show correct machines/stations
@@ -828,6 +926,18 @@ def solve_reschedule(
         C_final=res.C_final,
         T=res.T,
     )
+    machine_utilization = _build_resource_utilization(
+        schedule=schedule,
+        resource_key="machine",
+        resource_ids=list(data2.get("M", [])),
+        label_map=dict(data2.get("machine_label_map", {}) or {}),
+    )
+    station_utilization = _build_resource_utilization(
+        schedule=schedule,
+        resource_key="station",
+        resource_ids=list(data2.get("L", [])),
+        label_map=dict(data2.get("station_label_map", {}) or {}),
+    )
 
     return {
         "t0": float(t0),
@@ -840,6 +950,8 @@ def solve_reschedule(
         "rem_map": {int(k): int(v) for k, v in rem_map.items()},
         "schedule": schedule,
         "job_delays": job_delays,
+        "machine_utilization": machine_utilization,
+        "station_utilization": station_utilization,
         "note": "Reschedule solved by same engine: HeuristicBaseModel.run_heuristic",
         "M": list(data2.get("M", [])),
         "L": list(data2.get("L", [])),

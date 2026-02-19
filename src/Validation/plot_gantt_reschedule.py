@@ -45,10 +45,15 @@ def _make_job_color_map(schedule):
             if r.get("job_id") is not None and int(r.get("job_id")) >= 0
         ]
     )
-    cmap = plt.get_cmap("tab20")
+    palette = [
+        "#0B84F3", "#F39C12", "#2ECC71", "#E74C3C", "#9B59B6",
+        "#16A085", "#D35400", "#1ABC9C", "#34495E", "#E67E22",
+        "#27AE60", "#C0392B", "#8E44AD", "#2980B9", "#7F8C8D",
+        "#F1C40F", "#2E86DE", "#AF7AC5", "#48C9B0", "#EC7063",
+    ]
     job_color = {}
     for idx, j in enumerate(jobs):
-        job_color[int(j)] = cmap(idx % 20)
+        job_color[int(j)] = palette[idx % len(palette)]
     return job_color
 
 
@@ -252,7 +257,9 @@ def _plot_day_gantt(
     rows.sort(key=lambda r: (idx.get(_norm_res(r.get(key)), 10**9), r["_start_local"]))
 
     fig_h = max(6.0, min(18.0, 2.5 + 0.45 * len(resources)))
-    fig, ax = plt.subplots(figsize=(16, fig_h))
+    fig, ax = plt.subplots(figsize=(17, fig_h))
+    fig.patch.set_facecolor("#F7F9FC")
+    ax.set_facecolor("#FFFFFF")
 
     for r in rows:
         if is_weekend:
@@ -271,24 +278,47 @@ def _plot_day_gantt(
         dur = (seg_end - seg_start).total_seconds() / 3600.0
 
         jid = int(r.get("job_id", -1))
-        color = job_color.get(jid, (0.75, 0.75, 0.75, 1.0))
+        color = job_color.get(jid, "#BDC3C7")
 
-        ax.barh(y, dur, left=left, height=0.6, color=color, edgecolor="black", linewidth=0.6)
+        ax.barh(
+            y,
+            dur,
+            left=left,
+            height=0.52,
+            color=color,
+            edgecolor="#FFFFFF",
+            linewidth=1.0,
+            alpha=0.95,
+        )
         if dur >= 0.2:
             label = str(r.get("op_label", r.get("op_id", "")))
-            ax.text(left + max(0.03, dur * 0.02), y, label, va="center", fontsize=8, color="black")
+            ax.text(
+                left + max(0.03, dur * 0.02),
+                y,
+                label,
+                va="center",
+                fontsize=8,
+                color="#1F2937",
+                bbox=dict(boxstyle="round,pad=0.18", fc="white", ec="none", alpha=0.75),
+            )
 
     tick_count = int(round(workday_hours))
     tick_count = max(1, tick_count)
     ax.set_xlim(0.0, workday_hours)
     ax.set_xticks([float(h) for h in range(0, tick_count + 1)])
     ax.set_xticklabels([f"{(shift_start.hour + h) % 24:02d}:00" for h in range(0, tick_count + 1)])
-    ax.set_xlabel("Saat")
+    ax.set_xlabel("Saat", fontsize=10, color="#374151")
     ax.set_yticks(range(len(resources)))
-    ax.set_yticklabels(_resource_labels(resources, resource_label_map))
-    ax.set_title(title)
-    ax.grid(True, axis="x", linestyle="--", linewidth=0.5, alpha=0.6)
-    ax.grid(True, axis="y", linestyle=":", linewidth=0.3, alpha=0.4)
+    ax.set_yticklabels(_resource_labels(resources, resource_label_map), fontsize=9, color="#374151")
+    ax.set_title(title, fontsize=13, weight="bold", color="#111827")
+    ax.tick_params(axis="x", labelsize=9, colors="#374151")
+    ax.grid(True, axis="x", linestyle="-", linewidth=0.8, alpha=0.22, color="#6B7280")
+    ax.grid(True, axis="y", linestyle="-", linewidth=0.5, alpha=0.10, color="#9CA3AF")
+    ax.set_axisbelow(True)
+
+    for spine in ax.spines.values():
+        spine.set_color("#D1D5DB")
+        spine.set_linewidth(0.8)
 
     if t0_local is not None and day_start <= t0_local <= day_end:
         t0h = (t0_local - day_start).total_seconds() / 3600.0
@@ -299,9 +329,19 @@ def _plot_day_gantt(
         ax.text(workday_hours / 2.0, max(0, len(resources) - 1), "Hafta Sonu", ha="center", va="center", fontsize=10, alpha=0.7)
 
     legend_jobs = sorted([j for j in job_color.keys() if j >= 0])
-    handles = [Patch(facecolor=job_color[j], edgecolor="black", label=f"Job {j}") for j in legend_jobs]
+    handles = [Patch(facecolor=job_color[j], edgecolor="white", label=f"Job {j}") for j in legend_jobs]
     if handles:
-        ax.legend(handles=handles, loc="center left", bbox_to_anchor=(1.01, 0.5), title="Color -> Job")
+        ax.legend(
+            handles=handles,
+            loc="center left",
+            bbox_to_anchor=(1.01, 0.5),
+            title="Job Renkleri",
+            frameon=True,
+            facecolor="white",
+            edgecolor="#E5E7EB",
+            fontsize=8,
+            title_fontsize=9,
+        )
 
     fig.subplots_adjust(left=0.07, right=0.82, top=0.90, bottom=0.12)
     fig.savefig(out_png, dpi=200)

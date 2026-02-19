@@ -81,6 +81,32 @@ def _is_fason_op(op: dict) -> bool:
     return ("FASON" in machine_code) or ("FASON" in machine_name)
 
 
+def _resource_bucket(op: dict) -> Optional[int]:
+    text = " ".join([
+        str(op.get("workCenterName") or ""),
+        str(op.get("workCenterMachineCode") or ""),
+        str(op.get("name") or ""),
+    ]).upper()
+
+    if "REWORK" in text:
+        return 2
+    if ("KALİTE" in text) or ("KALITE" in text) or ("QUALITY" in text):
+        return 7
+    if ("BOYA" in text) or ("PAINT" in text):
+        return 1
+
+    mid = _to_int_safe(op.get("workCenterMachineId"), 0)
+    sid = _to_int_safe(op.get("workCenterId"), 0)
+    if (mid in (46, 2)) or (sid in (48, 2)):
+        return 2
+    if (mid == 7) or (sid == 7):
+        return 7
+    if (mid == 1) or (sid == 1):
+        return 1
+
+    return None
+
+
 def build_data_from_operations(
     operations: List[dict],
     base_meta: Dict[str, Any],
@@ -129,75 +155,14 @@ def build_data_from_operations(
     # -------------------------
     # Build M / L universe
     # -------------------------
-    machine_ids_cfg = _deep_get(base_meta, ["machines", "machine_ids"], None) or base_meta.get("M")
-    station_ids_cfg = _deep_get(base_meta, ["stations", "station_ids"], None) or base_meta.get("L")
+    # Keep only BOYA(1), REWORK(2), KALITE(7) resources and drop unknown centers.
+    ops_in = [o for o in ops_in if _resource_bucket(o) in (1, 2, 7)]
 
-    data_machine_ids = sorted({
-        _to_int_safe(o.get("workCenterMachineId"), 0)
-        for o in ops_in
-        if _to_int_safe(o.get("workCenterMachineId"), 0) > 0
-    })
-    data_station_ids = sorted({
-        _to_int_safe(o.get("workCenterId"), 0)
-        for o in ops_in
-        if _to_int_safe(o.get("workCenterId"), 0) > 0
-    })
-
-    # if config missing => use data ids (or fallback)
-    if not machine_ids_cfg:
-        machine_ids_cfg = data_machine_ids or [1, 2, 3, 4]
-    if not station_ids_cfg:
-        station_ids_cfg = data_station_ids or [1, 2, 3, 4]
-
-    # if config exists but does NOT cover data ids => expand with data ids
-    try:
-        cfgM = sorted({int(x) for x in (machine_ids_cfg or [])})
-    except Exception:
-        cfgM = []
-    try:
-        cfgL = sorted({int(x) for x in (station_ids_cfg or [])})
-    except Exception:
-        cfgL = []
-
-    if data_machine_ids:
-        missingM = [m for m in data_machine_ids if m not in cfgM]
-        if missingM:
-            cfgM = sorted(set(cfgM) | set(data_machine_ids))
-    if data_station_ids:
-        missingL = [l for l in data_station_ids if l not in cfgL]
-        if missingL:
-            cfgL = sorted(set(cfgL) | set(data_station_ids))
-
-    M = cfgM if cfgM else (data_machine_ids or [1, 2, 3, 4])
-    L = cfgL if cfgL else (data_station_ids or [1, 2, 3, 4])
-
-    M = [int(x) for x in M]
-    L = [int(x) for x in L]
+    M = [1, 2, 7]
+    L = [1, 2, 7]
 
     M_set = set(int(x) for x in M)
     L_set = set(int(x) for x in L)
-
-    # Each fason operation gets its own dedicated machine and station ids.
-    fason_machine_of_raw_op: Dict[int, int] = {}
-    fason_station_of_raw_op: Dict[int, int] = {}
-    next_fason_machine = (max(M) + 1) if M else 1
-    next_fason_station = (max(L) + 1) if L else 1
-    for op in ops_in:
-        if not _is_fason_op(op):
-            continue
-        raw_op_id = _to_int_safe(op.get("id"), 0)
-        if raw_op_id <= 0 or raw_op_id in fason_machine_of_raw_op:
-            continue
-
-        fason_machine_of_raw_op[raw_op_id] = next_fason_machine
-        M.append(next_fason_machine)
-        M_set.add(next_fason_machine)
-        next_fason_machine += 1
-
-        fason_station_of_raw_op[raw_op_id] = next_fason_station
-        L.append(next_fason_station)
-        L_set.add(next_fason_station)
-        next_fason_station += 1
 
     # station type -> big/small (kept for compatibility)
     station_types = _deep_get(base_meta, ["stations", "station_types"], {}) or {}
@@ -215,12 +180,12 @@ def build_data_from_operations(
         L_small = [x for x in L if x not in L_big]
 
     defaults = base_meta.get("defaults", {}) if isinstance(base_meta.get("defaults"), dict) else {}
-    allow_all_m = bool(defaults.get("allow_all_machines_if_missing", True))
-    allow_all_l = bool(defaults.get("allow_all_stations_if_missing", True))
+    allow_all_m = bool(defaults.get("allow_all_machines_if_missing", False))
+    allow_all_l = bool(defaults.get("allow_all_stations_if_missing", False))
     default_pt_hours = float(defaults.get("default_processing_time_hours", 1.0))
     min_pt_hours = float(defaults.get("min_processing_time_hours", 1.0 / 60.0))  # 1 minute default
     use_planned_release_times = bool(base_meta.get("use_planned_release_times", False))
-    internal_machines = [m for m in range(1, 13) if m in M_set]
+    internal_machines = [1, 2, 7]
 
     # -------------------------
     # Grouping (Job definition)
@@ -318,54 +283,16 @@ def build_data_from_operations(
         return max(setup_h + default_pt_hours, min_pt_hours)
 
     def _machine_candidates(op: dict, op_id: int) -> List[int]:
-        # Fason operations must never consume internal machine capacity.
-        if _is_fason_op(op):
-            fm = fason_machine_of_raw_op.get(int(op_id))
-            if fm is not None:
-                return [int(fm)]
-
-        # Non-fason operations are restricted to internal machines 1..12.
-        mid = op.get("workCenterMachineId", None)
-        if mid is not None:
-            m = _to_int_safe(mid, default=0)
-            if m > 0 and m in internal_machines:
-                return [m]
-
-        # fallback: explicit candidates
-        mc = op.get("machineCandidates", None) or op.get("feasible_machines", None)
-        if mc:
-            try:
-                out = sorted({int(x) for x in mc if _to_int_safe(x, 0) in internal_machines})
-                if out:
-                    return out
-            except Exception:
-                pass
-
-        return list(internal_machines) if allow_all_m else []
+        mapped = _resource_bucket(op)
+        if mapped in (1, 2, 7):
+            return [int(mapped)]
+        return list(internal_machines) if allow_all_m else [1]
 
     def _station_candidates(op: dict) -> List[int]:
-        if _is_fason_op(op):
-            raw_op_id = _to_int_safe(op.get("id"), 0)
-            fs = fason_station_of_raw_op.get(int(raw_op_id))
-            if fs is not None:
-                return [int(fs)]
-
-        sid = op.get("workCenterId", None)
-        if sid is not None:
-            l = _to_int_safe(sid, default=0)
-            if l > 0 and l in L_set:
-                return [l]
-
-        sc = op.get("stationCandidates", None) or op.get("feasible_stations", None)
-        if sc:
-            try:
-                out = sorted({int(x) for x in sc if _to_int_safe(x, 0) in L_set})
-                if out:
-                    return out
-            except Exception:
-                pass
-
-        return list(L) if allow_all_l else []
+        mapped = _resource_bucket(op)
+        if mapped in (1, 2, 7):
+            return [int(mapped)]
+        return list(L) if allow_all_l else [1]
 
     # -------------------------
     # Build each job/group
@@ -508,14 +435,16 @@ def build_data_from_operations(
             machine_type[str(m)] = 1 if t == "TIG" else 2
 
     out = dict(base_meta)
-    machine_label_map = {str(int(m)): str(int(m)) for m in M}
-    station_label_map = {str(int(l)): str(int(l)) for l in L}
-
-    for k, machine_id in enumerate(sorted(fason_machine_of_raw_op.values()), start=1):
-        machine_label_map[str(int(machine_id))] = f"Fason {k}"
-
-    for k, station_id in enumerate(sorted(fason_station_of_raw_op.values()), start=1):
-        station_label_map[str(int(station_id))] = f"Fason {k}"
+    machine_label_map = {
+        "1": "BOYA",
+        "2": "REWORK",
+        "7": "KALITE KONTROL",
+    }
+    station_label_map = {
+        "1": "BOYA",
+        "2": "REWORK",
+        "7": "KALITE KONTROL",
+    }
 
     out.update({
         "J": J,

@@ -188,6 +188,26 @@ def _print_job_delay_report(result: dict, plan_start_iso: str = None, plan_calen
         )
 
 
+def _print_utilization_report(result: dict):
+    def _print_block(title: str, block: dict):
+        rows = block.get("rows", []) if isinstance(block, dict) else []
+        if not isinstance(rows, list):
+            rows = []
+        print(title)
+        for r in rows:
+            try:
+                rid = int(r.get("resource_id"))
+                label = str(r.get("label", rid))
+                busy = float(r.get("busy_hours", 0.0))
+                util = float(r.get("utilization_pct", 0.0))
+                print(f"resource_id={rid}, label={label}, busy_hours={busy:.3f}, utilization_pct={util:.2f}")
+            except Exception:
+                continue
+
+    _print_block("machine_utilization:", result.get("machine_utilization", {}))
+    _print_block("station_utilization:", result.get("station_utilization", {}))
+
+
 def _maybe_load_system_config(base_data_path: str, system_config_path: str = None):
     if system_config_path:
         if os.path.exists(system_config_path):
@@ -287,6 +307,7 @@ def main():
         plan_start_iso=baseline.get("plan_start_iso"),
         plan_calendar=baseline.get("plan_calendar"),
     )
+    _print_utilization_report(baseline)
 
     gantt_dir = os.path.join(OUT_BASELINE_DIR, "base_data_gantts")
     os.makedirs(gantt_dir, exist_ok=True)
