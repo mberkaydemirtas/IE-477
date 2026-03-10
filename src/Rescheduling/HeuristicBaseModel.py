@@ -357,7 +357,7 @@ def run_heuristic(
             + float(p_flag_j[int(j)]) * float(t_paint_j[int(j)])
         )
         C_final[int(j)] = float(cf)
-        T[int(j)] = max(float(cf) - float(d_j[int(j)]), 0.0)
+        T[int(j)] = max(float(cf) - float(d_j[int(j)]), 0.001)
 
     C_max = max(C_final.values()) if C_final else 0.0
     T_max = max(T.values()) if T else 0.0

@@ -9,7 +9,10 @@ import subprocess
 from typing import Optional, Tuple
 from datetime import datetime, timezone
 
-from solver_core import solve_reschedule
+if __package__ in (None, ""):
+    sys.path.insert(0, os.path.normpath(os.path.join(os.path.dirname(__file__), "..", "..")))
+
+from src.Validation.solver_core import solve_reschedule
 from adapter import build_data_from_operations  # ✅ ADDED
 
 

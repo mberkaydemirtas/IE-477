@@ -1,11 +1,28 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 
-from datetime import datetime, timezone
+from datetime import datetime, time, timedelta, timezone
 from typing import Any, Dict, List, Optional, Tuple, Set
 
 
 def _parse_iso(s: Optional[str]) -> Optional[datetime]:
+    if isinstance(s, (list, tuple)):
+        parts = list(s)
+        if len(parts) >= 3:
+            try:
+                year = int(parts[0])
+                month = int(parts[1])
+                day = int(parts[2])
+                hour = int(parts[3]) if len(parts) >= 4 else 0
+                minute = int(parts[4]) if len(parts) >= 5 else 0
+                second = int(parts[5]) if len(parts) >= 6 else 0
+                microsecond = 0
+                if len(parts) >= 7:
+                    nanos = int(parts[6])
+                    microsecond = max(0, min(999999, nanos // 1000))
+                return datetime(year, month, day, hour, minute, second, microsecond, tzinfo=timezone.utc)
+            except Exception:
+                return None
     if not s or not isinstance(s, str):
         return None
     s2 = s.strip().replace("Z", "+00:00")
@@ -63,6 +80,15 @@ def _to_float_safe(x: Any, default: float = 0.0) -> float:
 
 def _duration_hhmmss_to_hours(s: Optional[str]) -> float:
     # "HH:MM:SS" -> hours
+    if isinstance(s, (list, tuple)):
+        parts = list(s)
+        try:
+            hh = float(parts[0]) if len(parts) >= 1 else 0.0
+            mm = float(parts[1]) if len(parts) >= 2 else 0.0
+            ss = float(parts[2]) if len(parts) >= 3 else 0.0
+            return hh + mm / 60.0 + ss / 3600.0
+        except Exception:
+            return 0.0
     if not s:
         return 0.0
     try:
@@ -107,6 +133,113 @@ def _resource_bucket(op: dict) -> Optional[int]:
     return None
 
 
+def _extract_operations_payload(raw: Any) -> List[dict]:
+    if isinstance(raw, list):
+        return [x for x in raw if isinstance(x, dict)]
+    if not isinstance(raw, dict):
+        return []
+    for key in ("operations", "assignments", "items", "data", "workOrderOperationDtoList"):
+        value = raw.get(key)
+        if isinstance(value, list):
+            return [x for x in value if isinstance(x, dict)]
+    return []
+
+
+def _parse_utc_offset(offset_text: str) -> timezone:
+    s = str(offset_text or "+00:00").strip()
+    if len(s) == 6 and s[0] in "+-" and s[3] == ":":
+        try:
+            sign = 1 if s[0] == "+" else -1
+            hh = int(s[1:3])
+            mm = int(s[4:6])
+            return timezone(sign * timedelta(hours=hh, minutes=mm))
+        except Exception:
+            pass
+    return timezone.utc
+
+
+def _build_calendar(plan_start_dt: datetime, plan_calendar: Optional[dict]) -> dict:
+    cal = plan_calendar if isinstance(plan_calendar, dict) else {}
+    tz = _parse_utc_offset(cal.get("utc_offset", "+00:00"))
+    workdays_raw = cal.get("workdays", [0, 1, 2, 3, 4])
+    workdays = set()
+    for w in workdays_raw if isinstance(workdays_raw, list) else [0, 1, 2, 3, 4]:
+        try:
+            wi = int(w)
+            if 0 <= wi <= 6:
+                workdays.add(wi)
+        except Exception:
+            continue
+    if not workdays:
+        workdays = {0, 1, 2, 3, 4}
+    shift_text = str(cal.get("shift_start_local", "09:00"))
+    try:
+        hh, mm = shift_text.split(":")[:2]
+        shift_start = time(hour=int(hh), minute=int(mm))
+    except Exception:
+        shift_start = time(hour=9, minute=0)
+    try:
+        workday_hours = float(cal.get("workday_hours", 8.0))
+    except Exception:
+        workday_hours = 8.0
+    if workday_hours <= 0:
+        workday_hours = 8.0
+    return {
+        "plan_local": plan_start_dt.astimezone(tz),
+        "workdays": workdays,
+        "shift_start": shift_start,
+        "workday_hours": workday_hours,
+    }
+
+
+def _first_work_instant(plan_local, workdays, shift_start, workday_hours):
+    cur_day = plan_local.date()
+    while True:
+        if cur_day.weekday() in workdays:
+            day_start = datetime.combine(cur_day, shift_start, tzinfo=plan_local.tzinfo)
+            day_end = day_start + timedelta(hours=workday_hours)
+            if plan_local <= day_start:
+                return day_start
+            if day_start < plan_local < day_end:
+                return plan_local
+        cur_day = cur_day + timedelta(days=1)
+
+
+def _next_workday(d, workdays):
+    cur = d
+    for _ in range(8):
+        cur = cur + timedelta(days=1)
+        if cur.weekday() in workdays:
+            return cur
+    return cur
+
+
+def _local_dt_to_business_hours(dt: datetime, cal: dict) -> float:
+    target = dt.astimezone(cal["plan_local"].tzinfo)
+    cur = _first_work_instant(cal["plan_local"], cal["workdays"], cal["shift_start"], cal["workday_hours"])
+    if target <= cur:
+        return 0.0
+
+    total = 0.0
+    while cur < target:
+        day_start = datetime.combine(cur.date(), cal["shift_start"], tzinfo=cur.tzinfo)
+        day_end = day_start + timedelta(hours=cal["workday_hours"])
+        if cur < day_start:
+            cur = day_start
+        if cur >= day_end:
+            nd = _next_workday(cur.date(), cal["workdays"])
+            cur = datetime.combine(nd, cal["shift_start"], tzinfo=cur.tzinfo)
+            continue
+        step_end = min(day_end, target)
+        if step_end > cur:
+            total += (step_end - cur).total_seconds() / 3600.0
+            cur = step_end
+        if cur >= day_end and cur < target:
+            nd = _next_workday(cur.date(), cal["workdays"])
+            cur = datetime.combine(nd, cal["shift_start"], tzinfo=cur.tzinfo)
+    return total
+
+
 def build_data_from_operations(
     operations: List[dict],
     base_meta: Dict[str, Any],
@@ -143,6 +276,7 @@ def build_data_from_operations(
     location_map = location_map or {}
 
     plan_start_dt = _parse_iso(plan_start_iso) or datetime.now(timezone.utc)
+    business_calendar = _build_calendar(plan_start_dt, plan_calendar)
 
     # -------------------------
     # Filter only OPERATION dicts
@@ -155,11 +289,36 @@ def build_data_from_operations(
     # -------------------------
     # Build M / L universe
     # -------------------------
-    # Keep only BOYA(1), REWORK(2), KALITE(7) resources and drop unknown centers.
-    ops_in = [o for o in ops_in if _resource_bucket(o) in (1, 2, 7)]
+    # For narrow internal datasets we can collapse to BOYA/REWORK/KALITE buckets.
+    # For mixed or generic machine-shop datasets, preserve the real machine/station ids.
+    ops_filtered = [o for o in ops_in if _resource_bucket(o) in (1, 2, 7)]
+    has_other_resources = any(_resource_bucket(o) is None for o in ops_in)
 
-    M = [1, 2, 7]
-    L = [1, 2, 7]
+    if ops_filtered and not has_other_resources:
+        ops_in = ops_filtered
+        M = [1, 2, 7]
+        L = [1, 2, 7]
+    else:
+        seen_m: set = set()
+        seen_l: set = set()
+        for o in ops_in:
+            mid = _to_int_safe(o.get("workCenterMachineId"), 0)
+            sid = _to_int_safe(o.get("workCenterId"), 0)
+            if mid > 0:
+                seen_m.add(mid)
+            if sid > 0:
+                seen_l.add(sid)
+            for alt in o.get("alternativeMachineIds", []) or []:
+                if not isinstance(alt, dict):
+                    continue
+                alt_mid = _to_int_safe(alt.get("id"), 0)
+                alt_sid = _to_int_safe(alt.get("workCenterId"), 0)
+                if alt_mid > 0:
+                    seen_m.add(alt_mid)
+                if alt_sid > 0:
+                    seen_l.add(alt_sid)
+        M = sorted(seen_m) or [1]
+        L = sorted(seen_l) or [1]
 
     M_set = set(int(x) for x in M)
     L_set = set(int(x) for x in L)
@@ -180,12 +339,12 @@ def build_data_from_operations(
         L_small = [x for x in L if x not in L_big]
 
     defaults = base_meta.get("defaults", {}) if isinstance(base_meta.get("defaults"), dict) else {}
-    allow_all_m = bool(defaults.get("allow_all_machines_if_missing", False))
-    allow_all_l = bool(defaults.get("allow_all_stations_if_missing", False))
+    allow_all_m = bool(defaults.get("allow_all_machines_if_missing", True))
+    allow_all_l = bool(defaults.get("allow_all_stations_if_missing", True))
     default_pt_hours = float(defaults.get("default_processing_time_hours", 1.0))
     min_pt_hours = float(defaults.get("min_processing_time_hours", 1.0 / 60.0))  # 1 minute default
     use_planned_release_times = bool(base_meta.get("use_planned_release_times", False))
-    internal_machines = [1, 2, 7]
+    internal_machines = list(M)
 
     # -------------------------
     # Grouping (Job definition)
@@ -257,7 +416,9 @@ def build_data_from_operations(
         return fallback_next
 
     def _hours_from_plan(dt: datetime) -> float:
-        return max(0.0, (dt - plan_start_dt).total_seconds() / 3600.0)
+        return max(0.0, _local_dt_to_business_hours(dt, business_calendar))
+
+    global_due_dt = _parse_iso(base_meta.get("endDate"))
 
     def _compute_pt_hours(op: dict) -> float:
         setup_h = _duration_hhmmss_to_hours(op.get("plannedSetupDuration"))
@@ -266,16 +427,18 @@ def build_data_from_operations(
         st = _parse_iso(op.get("plannedStartDateTime"))
         en = _parse_iso(op.get("plannedEndDateTime"))
         if st and en:
-            win_s = (en - st).total_seconds()
-            win_h = max(0.0, win_s / 3600.0)
+            win_h = max(0.0, _local_dt_to_business_hours(en, business_calendar) - _local_dt_to_business_hours(st, business_calendar))
             return max(setup_h + win_h, min_pt_hours)
 
         ct = op.get("cycleTime", None)
         ct_val = 0.0
         if ct is not None:
-            sct = str(ct).strip()
-            if sct != "":
-                ct_val = _to_float_safe(ct, default=0.0)
+            if isinstance(ct, str) and ":" in ct:
+                ct_val = _duration_hhmmss_to_hours(ct) * 60.0
+            else:
+                sct = str(ct).strip()
+                if sct != "":
+                    ct_val = _to_float_safe(ct, default=0.0)
             if ct_val > 0.0 and qty > 0:
                 # cycleTime assumed minutes/part
                 return max(setup_h + (ct_val * qty) / 60.0, min_pt_hours)
@@ -284,15 +447,41 @@ def build_data_from_operations(
 
     def _machine_candidates(op: dict, op_id: int) -> List[int]:
         mapped = _resource_bucket(op)
-        if mapped in (1, 2, 7):
-            return [int(mapped)]
-        return list(internal_machines) if allow_all_m else [1]
+        candidates: List[int] = []
+        if mapped in M_set:
+            candidates.append(int(mapped))
+        mid = _to_int_safe(op.get("workCenterMachineId"), 0)
+        if mid in M_set:
+            candidates.append(mid)
+        for alt in op.get("alternativeMachineIds", []) or []:
+            if not isinstance(alt, dict):
+                continue
+            alt_mid = _to_int_safe(alt.get("id"), 0)
+            if alt_mid in M_set:
+                candidates.append(alt_mid)
+        candidates = sorted(set(candidates))
+        if candidates:
+            return candidates
+        return list(internal_machines) if allow_all_m else [M[0]]
 
     def _station_candidates(op: dict) -> List[int]:
         mapped = _resource_bucket(op)
-        if mapped in (1, 2, 7):
-            return [int(mapped)]
-        return list(L) if allow_all_l else [1]
+        candidates: List[int] = []
+        if mapped in L_set:
+            candidates.append(int(mapped))
+        sid = _to_int_safe(op.get("workCenterId"), 0)
+        if sid in L_set:
+            candidates.append(sid)
+        for alt in op.get("alternativeMachineIds", []) or []:
+            if not isinstance(alt, dict):
+                continue
+            alt_sid = _to_int_safe(alt.get("workCenterId"), 0)
+            if alt_sid in L_set:
+                candidates.append(alt_sid)
+        candidates = sorted(set(candidates))
+        if candidates:
+            return candidates
+        return list(L) if allow_all_l else [L[0]]
 
     # -------------------------
     # Build each job/group
@@ -360,7 +549,7 @@ def build_data_from_operations(
                 if st:
                     group_start_times.append(st)
 
-                due_dt = _parse_iso(op.get("endDate"))
+                due_dt = _parse_iso(op.get("endDate")) or global_due_dt
                 if due_dt:
                     group_due_times.append(due_dt)
 

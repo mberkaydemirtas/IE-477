@@ -9,8 +9,11 @@ import subprocess
 from typing import Optional, Tuple
 from datetime import datetime, time, timedelta, timezone
 
-from solver_core import solve_reschedule
-from adapter import build_data_from_operations
+if __package__ in (None, ""):
+    sys.path.insert(0, os.path.normpath(os.path.join(os.path.dirname(__file__), "..", "..")))
+
+from src.Validation.solver_core import solve_reschedule
+from src.Validation.adapter import build_data_from_operations
 
 DEFAULT_BASE_DATA_PATH = os.path.normpath(
     os.path.join(os.path.dirname(__file__), "data", "base_data.json")

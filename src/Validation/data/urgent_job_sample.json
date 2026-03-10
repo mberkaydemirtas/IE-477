@@ -1,0 +1,68 @@
+{
+  "id": 900001,
+  "objectType": "OPERATION",
+  "name": "ACIL FREZELEME TESTI",
+  "status": "PLANNED",
+  "plannedStartDateTime": [
+    2026,
+    1,
+    30,
+    9,
+    0,
+    0,
+    0
+  ],
+  "plannedEndDateTime": [
+    2026,
+    1,
+    30,
+    17,
+    0,
+    0,
+    0
+  ],
+  "plannedPartCount": 1,
+  "producedPartCount": 0,
+  "erpOperationItemNumber": "10",
+  "cycleTime": null,
+  "plannedSetupDuration": [
+    1,
+    0
+  ],
+  "completionRate": 0,
+  "parentId": 990001,
+  "parentName": "ACIL TEST PARCASI",
+  "partNumber": "URG-TEST-01",
+  "materialNumber": null,
+  "workOrderNumber": "URG|00|TTP|01|P1|26039999",
+  "erpCustomerOrderNumber": "URGENT-TEST-ORDER",
+  "erpCustomerOrderItem": "1",
+  "priority": "HIGH",
+  "workCenterId": 157,
+  "workCenterName": "MKN123",
+  "color": "#ef4444",
+  "workCenterMachineId": 299,
+  "workCenterMachineCode": "MKN123",
+  "isPlannable": true,
+  "maxParallelOperations": null,
+  "hourlyCost": null,
+  "alternativeMachineIds": [
+    {
+      "id": 300,
+      "machineCode": "MKN124",
+      "description": "MKN124 DIK ISLEM MERKEZI (BUYUK)",
+      "workCenterId": 158,
+      "hourlyCost": null
+    }
+  ],
+  "splitAmount": 1,
+  "endDate": [
+    2026,
+    2,
+    2,
+    17,
+    0,
+    0,
+    0
+  ]
+}

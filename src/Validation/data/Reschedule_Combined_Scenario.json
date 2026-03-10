@@ -4,8 +4,8 @@
   "reschedule_output": "reschedule_solution_05.json",
   "reschedule": {
     "mode": "optimize",
-    "unavailable_machines": [1],
-    "unavailable_stations": [2],
+    "unavailable_machines": [],
+    "unavailable_stations": [],
    "urgent_payload_path": "urgent_05_combined_shock.json"
 
   }

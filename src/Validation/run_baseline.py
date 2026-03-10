@@ -1,14 +1,18 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 
+import copy
 import json
 import os
 import subprocess
 import sys
 from datetime import datetime, time, timedelta, timezone
 
-from adapter import build_data_from_operations
-from solver_core import solve_baseline
+if __package__ in (None, ""):
+    sys.path.insert(0, os.path.normpath(os.path.join(os.path.dirname(__file__), "..", "..")))
+
+from src.Validation.adapter import build_data_from_operations
+from src.Validation.solver_core import solve_baseline
 
 OUT_BASELINE_DIR = os.path.normpath(
     os.path.join(os.path.dirname(__file__), "outputs", "baseline")
@@ -145,6 +149,58 @@ def _build_calendar(plan_start_iso: str, plan_calendar: dict):
     }
 
 
+def _build_schedule_output(original_ops: list, baseline: dict, plan_start_iso: str, plan_calendar: dict) -> list:
+    """
+    Build a list of operation objects in the same format as the uploaded JSON,
+    but with realPlannedStartDateTime and realPlannedEndDateTime updated from
+    the optimizer's schedule results.
+    """
+    cal = _build_calendar(plan_start_iso, plan_calendar)
+
+    # Build op_id -> {start, finish} lookup from schedule
+    sched_map = {}
+    for entry in baseline.get("schedule", []):
+        try:
+            op_id = int(entry["op_id"])
+            sched_map[op_id] = {
+                "start": float(entry["start"]),
+                "finish": float(entry["finish"]),
+            }
+        except Exception:
+            continue
+
+    result = []
+    for op in original_ops:
+        new_op = copy.deepcopy(op)
+        try:
+            op_id = int(op.get("id", -1))
+        except Exception:
+            op_id = -1
+
+        if op_id in sched_map and cal is not None:
+            start_bh = sched_map[op_id]["start"]
+            finish_bh = sched_map[op_id]["finish"]
+            start_dt = _business_hours_to_local_dt(start_bh, cal)
+            finish_dt = _business_hours_to_local_dt(finish_bh, cal)
+            # Format as ISO without microseconds (matches source format)
+            new_op["realPlannedStartDateTime"] = start_dt.strftime("%Y-%m-%dT%H:%M:%S")
+            new_op["realPlannedEndDateTime"] = finish_dt.strftime("%Y-%m-%dT%H:%M:%S")
+
+        result.append(new_op)
+    return result
+
+
+def _extract_operations(raw):
+    if isinstance(raw, list):
+        return raw
+    if isinstance(raw, dict):
+        for key in ("operations", "assignments", "items", "data", "workOrderOperationDtoList"):
+            value = raw.get(key)
+            if isinstance(value, list):
+                return value
+    return []
+
+
 def _print_job_delay_report(result: dict, plan_start_iso: str = None, plan_calendar: dict = None):
     rows = result.get("job_delays", []) if isinstance(result, dict) else []
     if not isinstance(rows, list):
@@ -251,7 +307,7 @@ def main():
     if isinstance(base_data, dict) and (
         "operations" not in base_data or not isinstance(base_data.get("operations"), list)
     ):
-        for alt_key in ("assignments", "items", "data"):
+        for alt_key in ("assignments", "items", "data", "workOrderOperationDtoList"):
             alt_val = base_data.get(alt_key)
             if isinstance(alt_val, list):
                 base_data = {**base_data, "operations": alt_val}
@@ -298,8 +354,14 @@ def main():
 
     out_json = os.path.join(OUT_BASELINE_DIR, "base_data_baseline_solution.json")
     _save_json_atomic(out_json, baseline)
-
     print(f"Baseline saved: {out_json}")
+
+    # Save second JSON: uploaded format with optimized realPlannedStart/EndDateTime
+    original_ops = _extract_operations(raw)
+    schedule_output = _build_schedule_output(original_ops, baseline, plan_start_iso, plan_calendar)
+    out_schedule_json = os.path.join(OUT_BASELINE_DIR, "base_data_schedule_output.json")
+    _save_json_atomic(out_schedule_json, schedule_output)
+    print(f"Schedule output saved: {out_schedule_json}")
     print("plan_start_iso:", baseline.get("plan_start_iso"))
     print("objective:", baseline.get("objective"))
     _print_job_delay_report(

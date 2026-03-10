@@ -11,8 +11,11 @@ import sys
 import subprocess
 from datetime import datetime, timezone
 
-from solver_core import solve_baseline
-from adapter import build_data_from_operations
+if __package__ in (None, ""):
+    sys.path.insert(0, os.path.normpath(os.path.join(os.path.dirname(__file__), "..", "..")))
+
+from src.Validation.solver_core import solve_baseline
+from src.Validation.adapter import build_data_from_operations
 
 
 OUT_BASELINE_DIR = os.path.normpath(

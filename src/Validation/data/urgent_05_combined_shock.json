@@ -1,6 +1,6 @@
 {
   "urgent_job": {
-    "job_id": 15,
+    "job_id": 10015,
     "release_time_mode": "t0",
     "due_time_mode": "t0_plus",
     "due_time_hours": 2,
@@ -8,13 +8,13 @@
       {
         "op_id": 31,
         "feasible_stations": [7],
-        "processing_time_hours": 20.0,
+        "cycleTime": 1200,
         "beta_big_station_required": false
       },
       {
         "op_id": 32,
         "feasible_stations": [1, 2],
-        "processing_time_hours": 20.1,
+        "cycleTime": 1206,
         "beta_big_station_required": true
       }
     ],
